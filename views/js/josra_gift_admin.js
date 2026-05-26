@@ -747,25 +747,19 @@
     // =========================================================================
 
     function adminAjax(params, callback) {
-        var data = $.extend({ token: getAdminToken() }, params);
         $.ajax({
             url:      G.ajaxUrl,
             type:     'POST',
-            data:     data,
+            data:     params,
             dataType: 'json',
             success:  function (response) {
                 if (typeof callback === 'function') { callback(response); }
             },
             error: function (xhr) {
                 console.error('[josra_gift_admin] Ajax error', xhr.status, xhr.responseText);
-                if (typeof callback === 'function') { callback({ error: 'Ajax error ' + xhr.status }); }
+                if (typeof callback === 'function') { callback([]); }
             },
         });
-    }
-
-    function getAdminToken() {
-        var m = window.location.search.match(/[?&]token=([^&]+)/);
-        return m ? m[1] : '';
     }
 
     // =========================================================================
