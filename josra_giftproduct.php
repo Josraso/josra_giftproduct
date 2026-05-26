@@ -316,14 +316,10 @@ class Josra_giftproduct extends Module
     public function hookDisplayHeader()
     {
         // Evaluar carrito en cada carga de página como backup
-        // (cubre casos donde actionCartUpdateQuantity no dispara en alguna versión de PS)
         if ($this->context->cart && Validate::isLoadedObject($this->context->cart) && $this->context->cart->id) {
             JosraGiftManager::log('[displayHeader] evaluando carrito=' . (int)$this->context->cart->id);
             $this->processCart($this->context->cart);
         }
-
-        $badgeBg   = Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR');
-        $badgeFg   = Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR');
 
         if ($this->psVersionBranch === '16') {
             $this->context->controller->addCSS($this->_path . 'views/css/josra_gift_front.css');
@@ -341,20 +337,40 @@ class Josra_giftproduct extends Module
             );
         }
 
-        $deletedFlag = $this->context->cookie->josra_gift_deleted ? (int)$this->context->cookie->josra_gift_deleted : 0;
+        // Calcular texto motivacional (cuánto falta para el siguiente regalo)
+        $motivationalText = '';
+        if ($this->context->cart && Validate::isLoadedObject($this->context->cart) && $this->context->cart->id) {
+            $giftManager = new JosraGiftManager($this->context, $this->psVersionBranch);
+            $nextInfo    = $giftManager->getNextRuleInfo($this->context->cart);
+            if ($nextInfo) {
+                $raw = Configuration::get('JOSRA_GIFT_MOTIVATIONAL_TEXT', $this->context->language->id);
+                $motivationalText = str_replace('{amount}', $this->formatPrice($nextInfo['amount_missing']), $raw);
+            }
+        }
+
+        $deletedFlag  = $this->context->cookie->josra_gift_deleted  ? 1 : 0;
+        $unlockedFlag = $this->context->cookie->josra_gift_unlocked ? 1 : 0;
 
         $this->context->smarty->assign(array(
-            'josra_ajax_url'        => $this->context->link->getModuleLink($this->name, 'ajax', array(), true),
-            'josra_badge_text'      => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
-            'josra_restore_label'   => $this->l('Restaurar mi regalo'),
-            'josra_deleted_warning' => $this->l('Has eliminado tu producto de regalo.'),
-            'josra_unlocked_msg'    => $this->l('¡Has desbloqueado un regalo!'),
-            'josra_upgraded_msg'    => $this->l('¡Has conseguido un regalo mejor!'),
-            'josra_gift_deleted'    => $deletedFlag,
+            'josra_ajax_url'          => $this->context->link->getModuleLink($this->name, 'ajax', array(), true),
+            'josra_badge_text'        => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
+            'josra_badge_bg'          => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
+            'josra_badge_fg'          => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
+            'josra_restore_label'     => $this->l('Restaurar mi regalo'),
+            'josra_deleted_warning'   => $this->l('Has eliminado tu producto de regalo.'),
+            'josra_unlocked_msg'      => $this->l('¡Has desbloqueado un regalo!'),
+            'josra_upgraded_msg'      => $this->l('¡Has conseguido un regalo mejor!'),
+            'josra_motivational_text' => $motivationalText,
+            'josra_gift_deleted'      => $deletedFlag,
+            'josra_gift_unlocked'     => $unlockedFlag,
         ));
 
-        if ($this->context->cookie->josra_gift_deleted) {
+        if ($deletedFlag) {
             $this->context->cookie->josra_gift_deleted = 0;
+            $this->context->cookie->write();
+        }
+        if ($unlockedFlag) {
+            $this->context->cookie->josra_gift_unlocked = 0;
             $this->context->cookie->write();
         }
 
@@ -380,6 +396,8 @@ class Josra_giftproduct extends Module
 
         $this->context->smarty->assign(array(
             'josra_badge_text' => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
+            'josra_badge_bg'   => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
+            'josra_badge_fg'   => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
         ));
         return $this->display(__FILE__, 'views/templates/hook/badge.tpl');
     }
