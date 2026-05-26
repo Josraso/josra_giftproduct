@@ -155,7 +155,7 @@ class AdminJosraGiftAjaxController extends ModuleAdminController
 
         $rule->date_start = !empty($dateStart) ? pSQL($dateStart) : null;
         $rule->date_end   = !empty($dateEnd)   ? pSQL($dateEnd)   : null;
-        $rule->max_uses   = !empty($maxUses)   ? (int)$maxUses    : null;
+        $rule->max_uses   = (!empty($maxUses) && (int)$maxUses > 0) ? (int)$maxUses : null;
 
         if (empty($rule->name)) {
             $this->jsonResponse(array('error' => 'El nombre es obligatorio'), 422);

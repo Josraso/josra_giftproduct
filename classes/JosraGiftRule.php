@@ -55,7 +55,7 @@ class JosraGiftRule extends ObjectModel
                 WHERE r.`active` = 1
                   AND (r.`date_start` IS NULL OR r.`date_start` = \'0000-00-00\' OR r.`date_start` <= \'' . $today . '\')
                   AND (r.`date_end`   IS NULL OR r.`date_end`   = \'0000-00-00\' OR r.`date_end`   >= \'' . $today . '\')
-                  AND (r.`max_uses`   IS NULL OR r.`uses_count` < r.`max_uses`)
+                  AND (r.`max_uses`   IS NULL OR r.`max_uses` = 0 OR r.`uses_count` < r.`max_uses`)
                 ORDER BY r.`priority` DESC, r.`id_josra_gift_rule` ASC';
         return (array)Db::getInstance()->executeS($sql);
     }
