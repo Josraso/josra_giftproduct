@@ -181,7 +181,6 @@ class Josra_giftproduct extends Module
             'actionCartUpdateQuantity',
             'actionAfterDeleteProductInCart',
             'displayCartExtraProductActions',
-            'displayCheckoutSubtotalDetails',
         );
 
         $version9 = array(

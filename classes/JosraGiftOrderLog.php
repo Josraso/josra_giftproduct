@@ -72,7 +72,7 @@ class JosraGiftOrderLog extends ObjectModel
              FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l
              WHERE l.`id_order` > 0' . $dateFilter . '
              GROUP BY l.`id_product`, l.`id_product_attribute`
-             ORDER BY cnt DESC LIMIT 1'
+             ORDER BY cnt DESC'
         );
 
         $topRule = Db::getInstance()->getRow(
@@ -80,7 +80,7 @@ class JosraGiftOrderLog extends ObjectModel
              FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l
              WHERE l.`id_order` > 0' . $dateFilter . '
              GROUP BY l.`id_josra_gift_rule`
-             ORDER BY cnt DESC LIMIT 1'
+             ORDER BY cnt DESC'
         );
 
         $lowStock = (array)Db::getInstance()->executeS(
