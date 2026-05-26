@@ -24,7 +24,7 @@ class JosraGiftManager
 
     public static function log($msg)
     {
-        $f = sys_get_temp_dir() . '/josra_gift.log';
+        $f = dirname(dirname(__FILE__)) . '/josra_gift.log';
         file_put_contents($f, date('H:i:s') . ' ' . $msg . "\n", FILE_APPEND | LOCK_EX);
     }
 
