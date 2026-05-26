@@ -80,13 +80,12 @@ class JosraGiftRule extends ObjectModel
         }
         $sql = 'SELECT l.*, rp.`id_product`, rp.`id_product_attribute`,
                        COALESCE(rp.`gift_qty`, 1) AS gift_qty,
-                       pl.`name` AS product_name
+                       (SELECT `name` FROM `' . _DB_PREFIX_ . 'product_lang`
+                        WHERE `id_product` = rp.`id_product`
+                          AND `id_lang` = ' . (int)$idLang . ' LIMIT 1) AS product_name
                 FROM `' . _DB_PREFIX_ . 'josra_gift_rule_level` l
                 LEFT JOIN `' . _DB_PREFIX_ . 'josra_gift_rule_product` rp
                        ON rp.`id_josra_gift_rule_level` = l.`id_josra_gift_rule_level`
-                LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
-                       ON pl.`id_product` = rp.`id_product`
-                      AND pl.`id_lang` = ' . (int)$idLang . '
                 WHERE l.`id_josra_gift_rule` = ' . (int)$ruleId . '
                 ORDER BY l.`trigger_value` ASC';
         return (array)Db::getInstance()->executeS($sql);

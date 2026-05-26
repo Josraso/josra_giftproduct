@@ -247,7 +247,7 @@ class JosraGiftManager
             false,
             'up',
             0,
-            new Shop((int)$cart->id_shop)
+            null
         );
 
         if (!$result) {
@@ -277,7 +277,7 @@ class JosraGiftManager
             false,
             'down',
             0,
-            new Shop((int)$cart->id_shop)
+            null
         );
 
         $this->removeGiftPrice($cart, (int)$currentGift['product_id'], (int)$currentGift['attr_id']);

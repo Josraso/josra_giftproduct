@@ -109,6 +109,8 @@ class Josra_giftproduct extends Module
                 return false;
             }
         }
+        // Ensure columns added in later versions exist on pre-existing tables
+        $this->upgrade('1.0.0', $this->version);
         return true;
     }
 
