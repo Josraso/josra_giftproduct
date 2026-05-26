@@ -21,6 +21,8 @@ class JosraGiftRule extends ObjectModel
     public $max_uses;
     public $uses_count;
     public $priority;
+    public $id_trigger_product;
+    public $trigger_min_qty;
     public $date_add;
     public $date_upd;
 
@@ -37,7 +39,9 @@ class JosraGiftRule extends ObjectModel
             'date_end'         => array('type' => self::TYPE_DATE,    'validate' => 'isDate', 'copy_post' => false),
             'max_uses'         => array('type' => self::TYPE_INT,     'validate' => 'isUnsignedInt', 'copy_post' => false),
             'uses_count'       => array('type' => self::TYPE_INT,     'validate' => 'isUnsignedInt'),
-            'priority'         => array('type' => self::TYPE_INT,     'validate' => 'isUnsignedInt'),
+            'priority'           => array('type' => self::TYPE_INT,     'validate' => 'isUnsignedInt'),
+            'id_trigger_product' => array('type' => self::TYPE_INT,  'validate' => 'isUnsignedInt'),
+            'trigger_min_qty'    => array('type' => self::TYPE_INT,  'validate' => 'isUnsignedInt'),
             'date_add'         => array('type' => self::TYPE_DATE,    'validate' => 'isDate'),
             'date_upd'         => array('type' => self::TYPE_DATE,    'validate' => 'isDate'),
         ),
@@ -69,12 +73,20 @@ class JosraGiftRule extends ObjectModel
         return (array)Db::getInstance()->executeS($sql);
     }
 
-    public static function getLevelsByRuleId($ruleId)
+    public static function getLevelsByRuleId($ruleId, $idLang = 0)
     {
-        $sql = 'SELECT l.*, p.`id_product`, p.`id_product_attribute`
+        if (!$idLang) {
+            $idLang = (int)Configuration::get('PS_LANG_DEFAULT');
+        }
+        $sql = 'SELECT l.*, rp.`id_product`, rp.`id_product_attribute`,
+                       COALESCE(rp.`gift_qty`, 1) AS gift_qty,
+                       pl.`name` AS product_name
                 FROM `' . _DB_PREFIX_ . 'josra_gift_rule_level` l
-                LEFT JOIN `' . _DB_PREFIX_ . 'josra_gift_rule_product` p
-                       ON p.`id_josra_gift_rule_level` = l.`id_josra_gift_rule_level`
+                LEFT JOIN `' . _DB_PREFIX_ . 'josra_gift_rule_product` rp
+                       ON rp.`id_josra_gift_rule_level` = l.`id_josra_gift_rule_level`
+                LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
+                       ON pl.`id_product` = rp.`id_product`
+                      AND pl.`id_lang` = ' . (int)$idLang . '
                 WHERE l.`id_josra_gift_rule` = ' . (int)$ruleId . '
                 ORDER BY l.`trigger_value` ASC';
         return (array)Db::getInstance()->executeS($sql);
@@ -127,6 +139,7 @@ class JosraGiftRule extends ObjectModel
                     'id_josra_gift_rule_level' => $levelId,
                     'id_product'               => (int)$level['id_product'],
                     'id_product_attribute'     => (int)(isset($level['id_product_attribute']) ? $level['id_product_attribute'] : 0),
+                    'gift_qty'                 => max(1, (int)(isset($level['gift_qty']) ? $level['gift_qty'] : 1)),
                 ));
             }
         }

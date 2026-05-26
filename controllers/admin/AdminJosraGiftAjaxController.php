@@ -59,7 +59,6 @@ class AdminJosraGiftAjaxController extends ModuleAdminController
              INNER JOIN `' . _DB_PREFIX_ . 'product_lang` pl
                      ON pl.`id_product` = p.`id_product`
                     AND pl.`id_lang` = ' . $idLang . '
-                    AND pl.`id_shop` = ' . $idShop . '
              LEFT JOIN `' . _DB_PREFIX_ . 'image` i
                     ON i.`id_product` = p.`id_product` AND i.`cover` = 1
              LEFT JOIN `' . _DB_PREFIX_ . 'stock_available` sa

@@ -5,7 +5,9 @@ CREATE TABLE IF NOT EXISTS `PREFIX_josra_gift_rule` (
     `id_josra_gift_rule`    INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
     `name`                  VARCHAR(128)     NOT NULL,
     `active`                TINYINT(1)       NOT NULL DEFAULT 1,
-    `trigger_type`          ENUM('amount','quantity') NOT NULL DEFAULT 'amount',
+    `trigger_type`          ENUM('amount','quantity','product') NOT NULL DEFAULT 'amount',
+    `id_trigger_product`    INT(10) UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Solo para trigger_type=product',
+    `trigger_min_qty`       INT(10) UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Cantidad mínima del producto disparador',
     `calc_mode`             ENUM('without_tax','with_tax') NOT NULL DEFAULT 'without_tax',
     `include_shipping`      TINYINT(1)       NOT NULL DEFAULT 0,
     `date_start`            DATE             NULL DEFAULT NULL,
@@ -34,6 +36,7 @@ CREATE TABLE IF NOT EXISTS `PREFIX_josra_gift_rule_product` (
     `id_josra_gift_rule_level`      INT(10) UNSIGNED NOT NULL,
     `id_product`                    INT(10) UNSIGNED NOT NULL,
     `id_product_attribute`          INT(10) UNSIGNED NOT NULL DEFAULT 0 COMMENT '0 = sin combinación',
+    `gift_qty`                      INT(10) UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Unidades a regalar',
     PRIMARY KEY (`id_josra_gift_rule_product`),
     KEY `idx_level` (`id_josra_gift_rule_level`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

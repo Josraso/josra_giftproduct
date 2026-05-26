@@ -44,11 +44,22 @@ class JosraGiftManager
             return;
         }
 
-        $rule      = $filteredRules[0];
-        $cartValue = $this->getCartValue($cart, $rule);
-        $cartQty   = $this->getCartQuantity($cart);
-        $levels    = JosraGiftRule::getLevelsByRuleId((int)$rule['id_josra_gift_rule']);
-        $activeLevel = $this->getActiveLevel($levels, $cartValue, $cartQty, $rule['trigger_type']);
+        $rule   = $filteredRules[0];
+        $levels = JosraGiftRule::getLevelsByRuleId((int)$rule['id_josra_gift_rule']);
+
+        if ($rule['trigger_type'] === 'product') {
+            $triggerProductId = (int)$rule['id_trigger_product'];
+            $triggerMinQty    = max(1, (int)$rule['trigger_min_qty']);
+            if (!$triggerProductId || $this->getCartQtyForProduct($cart, $triggerProductId) < $triggerMinQty) {
+                $this->removeCurrentGift($cart);
+                return;
+            }
+            $activeLevel = !empty($levels) ? $levels[0] : null;
+        } else {
+            $cartValue   = $this->getCartValue($cart, $rule);
+            $cartQty     = $this->getCartQuantity($cart);
+            $activeLevel = $this->getActiveLevel($levels, $cartValue, $cartQty, $rule['trigger_type']);
+        }
 
         if (!$activeLevel) {
             $this->removeCurrentGift($cart);
@@ -127,6 +138,18 @@ class JosraGiftManager
         return $total;
     }
 
+    private function getCartQtyForProduct($cart, $productId)
+    {
+        $products = $cart->getProducts();
+        $total    = 0;
+        foreach ($products as $product) {
+            if ((int)$product['id_product'] === (int)$productId && !$this->isGiftCartRow($product)) {
+                $total += (int)$product['cart_quantity'];
+            }
+        }
+        return $total;
+    }
+
     // =========================================================================
     // TRAMOS
     // =========================================================================
@@ -181,6 +204,7 @@ class JosraGiftManager
         return array(
             'id_product'           => $productId,
             'id_product_attribute' => $attrId,
+            'gift_qty'             => max(1, (int)(isset($level['gift_qty']) ? $level['gift_qty'] : 1)),
         );
     }
 
@@ -214,9 +238,10 @@ class JosraGiftManager
     {
         $productId = (int)$giftProduct['id_product'];
         $attrId    = (int)$giftProduct['id_product_attribute'];
+        $giftQty   = max(1, (int)(isset($giftProduct['gift_qty']) ? $giftProduct['gift_qty'] : 1));
 
         $result = $cart->updateQty(
-            1,
+            $giftQty,
             $productId,
             $attrId,
             false,
@@ -230,7 +255,7 @@ class JosraGiftManager
         }
 
         $this->setGiftPrice($cart, $productId, $attrId);
-        $this->markCartItemAsGift($cart, $productId, $attrId, (int)$rule['id_josra_gift_rule'], (int)$level['id_josra_gift_rule_level']);
+        $this->markCartItemAsGift($cart, $productId, $attrId, (int)$rule['id_josra_gift_rule'], (int)$level['id_josra_gift_rule_level'], $giftQty);
 
         $this->context->cookie->josra_gift_unlocked = 1;
         $this->context->cookie->write();
@@ -243,8 +268,10 @@ class JosraGiftManager
             return;
         }
 
+        $giftQty = max(1, (int)(isset($currentGift['gift_qty']) ? $currentGift['gift_qty'] : 1));
+
         $cart->updateQty(
-            1,
+            $giftQty,
             (int)$currentGift['product_id'],
             (int)$currentGift['attr_id'],
             false,
@@ -310,7 +337,7 @@ class JosraGiftManager
     // METADATOS DE REGALO EN SESIÓN (cookie)
     // =========================================================================
 
-    private function markCartItemAsGift($cart, $productId, $attrId, $ruleId, $levelId)
+    private function markCartItemAsGift($cart, $productId, $attrId, $ruleId, $levelId, $giftQty = 1)
     {
         $meta = array(
             'cart_id'    => (int)$cart->id,
@@ -318,6 +345,7 @@ class JosraGiftManager
             'attr_id'    => $attrId,
             'rule_id'    => $ruleId,
             'level_id'   => $levelId,
+            'gift_qty'   => max(1, (int)$giftQty),
             'ts'         => time(),
         );
         $this->context->cookie->josra_gift_meta = json_encode($meta);
@@ -342,10 +370,12 @@ class JosraGiftManager
             return null;
         }
 
+        $expectedQty = max(1, (int)(isset($meta['gift_qty']) ? $meta['gift_qty'] : 1));
         $products = $cart->getProducts();
         foreach ($products as $p) {
             if ((int)$p['id_product'] === (int)$meta['product_id']
-                && (int)$p['id_product_attribute'] === (int)$meta['attr_id']) {
+                && (int)$p['id_product_attribute'] === (int)$meta['attr_id']
+                && (int)$p['cart_quantity'] >= $expectedQty) {
                 return $meta;
             }
         }
@@ -470,10 +500,15 @@ class JosraGiftManager
             return null;
         }
 
-        $rule      = $rules[0];
+        $rule   = $rules[0];
+        $levels = JosraGiftRule::getLevelsByRuleId((int)$rule['id_josra_gift_rule']);
+
+        if ($rule['trigger_type'] === 'product') {
+            return null;
+        }
+
         $cartValue = $this->getCartValue($cart, $rule);
         $cartQty   = $this->getCartQuantity($cart);
-        $levels    = JosraGiftRule::getLevelsByRuleId((int)$rule['id_josra_gift_rule']);
 
         foreach ($levels as $level) {
             $threshold = (float)$level['trigger_value'];
