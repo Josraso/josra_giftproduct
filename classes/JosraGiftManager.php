@@ -54,6 +54,13 @@ class JosraGiftManager
             return;
         }
 
+        // Diagnóstico: volcar TODAS las reglas de la tabla sin filtros
+        $allRules = Db::getInstance()->executeS(
+            'SELECT `id_josra_gift_rule`, `name`, `active`, `date_start`, `date_end`, `max_uses`, `uses_count`
+             FROM `' . _DB_PREFIX_ . 'josra_gift_rule`'
+        );
+        self::log('DUMP reglas BD: ' . json_encode($allRules));
+
         $rules = JosraGiftRule::getActiveRules();
         self::log('getActiveRules: ' . count($rules) . ' reglas activas');
         if (empty($rules)) {
