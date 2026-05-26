@@ -275,6 +275,7 @@ class Josra_giftproduct extends Module
     public function hookActionCartUpdateQuantity($params)
     {
         $cart = isset($params['cart']) ? $params['cart'] : $this->context->cart;
+        JosraGiftManager::log('[hook] actionCartUpdateQuantity cart=' . ($cart ? (int)$cart->id : 'null'));
         if ($cart) {
             $this->processCart($cart);
         }
@@ -314,6 +315,13 @@ class Josra_giftproduct extends Module
 
     public function hookDisplayHeader()
     {
+        // Evaluar carrito en cada carga de página como backup
+        // (cubre casos donde actionCartUpdateQuantity no dispara en alguna versión de PS)
+        if ($this->context->cart && Validate::isLoadedObject($this->context->cart) && $this->context->cart->id) {
+            JosraGiftManager::log('[displayHeader] evaluando carrito=' . (int)$this->context->cart->id);
+            $this->processCart($this->context->cart);
+        }
+
         $badgeBg   = Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR');
         $badgeFg   = Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR');
 
