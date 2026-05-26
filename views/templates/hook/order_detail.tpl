@@ -7,7 +7,7 @@
     </span>
     <span class="josra-gift-price-zero">0,00 €</span>
     <small class="text-muted">
-        ({l s='Valor real' mod='josra_giftproduct'}: {displayPrice price=$josra_gift_log.original_price})
+        ({l s='Valor real' mod='josra_giftproduct'}: {$josra_gift_original_price|escape:'html':'UTF-8'})
     </small>
 </div>
 {/if}

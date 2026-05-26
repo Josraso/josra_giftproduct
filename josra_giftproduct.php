@@ -443,8 +443,9 @@ class Josra_giftproduct extends Module
             return '';
         }
         $this->context->smarty->assign(array(
-            'josra_gift_log'   => $log,
-            'josra_badge_text' => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
+            'josra_gift_log'            => $log,
+            'josra_gift_original_price' => $this->formatPrice((float)$log['original_price']),
+            'josra_badge_text'          => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
         ));
         return $this->display(__FILE__, 'views/templates/hook/order_detail.tpl');
     }
@@ -482,8 +483,9 @@ class Josra_giftproduct extends Module
             return '';
         }
         $this->context->smarty->assign(array(
-            'josra_gift_log'   => $log,
-            'josra_badge_text' => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
+            'josra_gift_log'            => $log,
+            'josra_gift_original_price' => $this->formatPrice((float)$log['original_price']),
+            'josra_badge_text'          => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
         ));
         return $this->display(__FILE__, 'views/templates/admin/order_gift_info.tpl');
     }
@@ -491,6 +493,16 @@ class Josra_giftproduct extends Module
     public function hookDisplayAdminOrdersView($params)
     {
         return $this->hookDisplayAdminOrdersExtra($params);
+    }
+
+    private function formatPrice($price)
+    {
+        $currency = $this->context->currency;
+        if (method_exists('Tools', 'displayPrice')) {
+            return Tools::displayPrice($price, $currency);
+        }
+        $sign = $currency ? $currency->sign : '€';
+        return number_format($price, 2, ',', '.') . ' ' . $sign;
     }
 
     public function hookActionOrderStatusUpdate($params)

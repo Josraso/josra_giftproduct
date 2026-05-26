@@ -30,7 +30,7 @@
                     </tr>
                     <tr>
                         <th>{l s='Valor real del producto' mod='josra_giftproduct'}</th>
-                        <td>{displayPrice price=$josra_gift_log.original_price}</td>
+                        <td>{$josra_gift_original_price|escape:'html':'UTF-8'}</td>
                     </tr>
                     <tr>
                         <th>{l s='Fecha aplicación' mod='josra_giftproduct'}</th>
