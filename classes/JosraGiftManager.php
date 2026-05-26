@@ -28,6 +28,19 @@ class JosraGiftManager
 
     public function evaluateAndApply($cart)
     {
+        // Evitar recursión: addGiftToCart llama a cart->updateQty() que vuelve
+        // a disparar actionCartUpdateQuantity, lo que llamaría aquí de nuevo.
+        static $running = false;
+        if ($running) {
+            return;
+        }
+        $running = true;
+        $this->doEvaluateAndApply($cart);
+        $running = false;
+    }
+
+    private function doEvaluateAndApply($cart)
+    {
         if (!Validate::isLoadedObject($cart)) {
             return;
         }
@@ -74,7 +87,6 @@ class JosraGiftManager
             if ($fallbackLevel) {
                 $giftProduct = $this->resolveGiftProduct($fallbackLevel);
                 if ($giftProduct) {
-                    // Avisar de que se ha caído al nivel anterior por stock
                     $this->context->cookie->josra_gift_fallback = 1;
                     $this->context->cookie->write();
                 }
