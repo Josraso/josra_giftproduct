@@ -1,0 +1,564 @@
+<?php
+/**
+ * JosraGiftManager - Núcleo lógico del módulo
+ * Compatible PHP 5.6+
+ */
+
+if (!defined('_PS_VERSION_')) {
+    exit;
+}
+
+class JosraGiftManager
+{
+    /** @var Context */
+    private $context;
+
+    /** @var string '16'|'17'|'8x'|'9x' */
+    private $psVersionBranch;
+
+    public function __construct($context, $psVersionBranch)
+    {
+        $this->context         = $context;
+        $this->psVersionBranch = $psVersionBranch;
+    }
+
+    // =========================================================================
+    // MÉTODO PRINCIPAL
+    // =========================================================================
+
+    public function evaluateAndApply($cart)
+    {
+        if (!Validate::isLoadedObject($cart)) {
+            return;
+        }
+
+        $rules = JosraGiftRule::getActiveRules();
+        if (empty($rules)) {
+            $this->removeCurrentGift($cart);
+            return;
+        }
+
+        $filteredRules = $this->filterRulesBySegmentation($rules, $cart);
+        if (empty($filteredRules)) {
+            $this->removeCurrentGift($cart);
+            return;
+        }
+
+        $rule      = $filteredRules[0];
+        $cartValue = $this->getCartValue($cart, $rule);
+        $cartQty   = $this->getCartQuantity($cart);
+        $levels    = JosraGiftRule::getLevelsByRuleId((int)$rule['id_josra_gift_rule']);
+        $activeLevel = $this->getActiveLevel($levels, $cartValue, $cartQty, $rule['trigger_type']);
+
+        if (!$activeLevel) {
+            $this->removeCurrentGift($cart);
+            return;
+        }
+
+        $giftProduct = $this->resolveGiftProduct($activeLevel);
+
+        // Fallback: si el tramo activo no tiene stock, intentar el nivel anterior
+        if (!$giftProduct) {
+            $fallbackLevel = $this->getFallbackLevel($levels, $activeLevel);
+            if ($fallbackLevel) {
+                $giftProduct = $this->resolveGiftProduct($fallbackLevel);
+                if ($giftProduct) {
+                    // Avisar de que se ha caído al nivel anterior por stock
+                    $this->context->cookie->josra_gift_fallback = 1;
+                    $this->context->cookie->write();
+                }
+            }
+        }
+
+        if (!$giftProduct) {
+            $this->removeCurrentGift($cart);
+            return;
+        }
+
+        $currentGift = $this->getCurrentGiftInCart($cart);
+
+        if ($currentGift) {
+            if ((int)$currentGift['product_id'] === (int)$giftProduct['id_product']
+                && (int)$currentGift['attr_id'] === (int)$giftProduct['id_product_attribute']) {
+                return;
+            }
+            $this->removeCurrentGift($cart);
+        }
+
+        $this->addGiftToCart($cart, $giftProduct, $rule, $activeLevel);
+    }
+
+    // =========================================================================
+    // CÁLCULO DEL VALOR DEL CARRITO
+    // =========================================================================
+
+    private function getCartValue($cart, $rule)
+    {
+        $withTax         = ($rule['calc_mode'] === 'with_tax');
+        $includeShipping = (bool)$rule['include_shipping'];
+
+        if ($withTax) {
+            $cartTotal = $cart->getOrderTotal(true, Cart::ONLY_PRODUCTS);
+        } else {
+            $cartTotal = $cart->getOrderTotal(false, Cart::ONLY_PRODUCTS);
+        }
+
+        if ($includeShipping) {
+            if ($withTax) {
+                $cartTotal += $cart->getOrderTotal(true, Cart::ONLY_SHIPPING);
+            } else {
+                $cartTotal += $cart->getOrderTotal(false, Cart::ONLY_SHIPPING);
+            }
+        }
+
+        return (float)$cartTotal;
+    }
+
+    private function getCartQuantity($cart)
+    {
+        $products = $cart->getProducts();
+        $total    = 0;
+        foreach ($products as $product) {
+            if ($this->isGiftCartRow($product)) {
+                continue;
+            }
+            $total += (int)$product['cart_quantity'];
+        }
+        return $total;
+    }
+
+    // =========================================================================
+    // TRAMOS
+    // =========================================================================
+
+    private function getActiveLevel($levels, $cartValue, $cartQty, $triggerType)
+    {
+        $activeLevel = null;
+        foreach ($levels as $level) {
+            $threshold = (float)$level['trigger_value'];
+            if ($triggerType === 'quantity') {
+                $reached = ($cartQty >= $threshold);
+            } else {
+                $reached = ($cartValue >= $threshold);
+            }
+            if ($reached) {
+                $activeLevel = $level;
+            }
+        }
+        return $activeLevel;
+    }
+
+    private function getFallbackLevel($levels, $activeLevel)
+    {
+        $activeTrigger = (float)$activeLevel['trigger_value'];
+        $fallback      = null;
+        foreach ($levels as $level) {
+            $threshold = (float)$level['trigger_value'];
+            if ($threshold < $activeTrigger) {
+                $fallback = $level;
+            }
+        }
+        return $fallback;
+    }
+
+    // =========================================================================
+    // PRODUCTO REGALO
+    // =========================================================================
+
+    private function resolveGiftProduct($level)
+    {
+        $productId = (int)(isset($level['id_product']) ? $level['id_product'] : 0);
+        $attrId    = (int)(isset($level['id_product_attribute']) ? $level['id_product_attribute'] : 0);
+
+        if (!$productId) {
+            return null;
+        }
+
+        if ($this->isOutOfStock($productId, $attrId)) {
+            return null;
+        }
+
+        return array(
+            'id_product'           => $productId,
+            'id_product_attribute' => $attrId,
+        );
+    }
+
+    private function isOutOfStock($productId, $attrId)
+    {
+        $qty     = StockAvailable::getQuantityAvailableByProduct($productId, $attrId);
+        $product = new Product($productId, false, $this->context->language->id);
+
+        if (Validate::isLoadedObject($product)) {
+            $oos = (int)$product->out_of_stock;
+            if ($oos === 1) {
+                // Permite pedidos sin stock
+                return false;
+            }
+            if ($oos === 2) {
+                // Usa configuración global
+                if ((int)Configuration::get('PS_ORDER_OUT_OF_STOCK')) {
+                    return false;
+                }
+            }
+        }
+
+        return $qty <= 0;
+    }
+
+    // =========================================================================
+    // AÑADIR / QUITAR REGALO
+    // =========================================================================
+
+    private function addGiftToCart($cart, $giftProduct, $rule, $level)
+    {
+        $productId = (int)$giftProduct['id_product'];
+        $attrId    = (int)$giftProduct['id_product_attribute'];
+
+        $result = $cart->updateQty(
+            1,
+            $productId,
+            $attrId,
+            false,
+            'up',
+            0,
+            new Shop((int)$cart->id_shop)
+        );
+
+        if (!$result) {
+            return;
+        }
+
+        $this->setGiftPrice($cart, $productId, $attrId);
+        $this->markCartItemAsGift($cart, $productId, $attrId, (int)$rule['id_josra_gift_rule'], (int)$level['id_josra_gift_rule_level']);
+
+        $this->context->cookie->josra_gift_unlocked = 1;
+        $this->context->cookie->write();
+    }
+
+    public function removeCurrentGift($cart)
+    {
+        $currentGift = $this->getCurrentGiftInCart($cart);
+        if (!$currentGift) {
+            return;
+        }
+
+        $cart->updateQty(
+            1,
+            (int)$currentGift['product_id'],
+            (int)$currentGift['attr_id'],
+            false,
+            'down',
+            0,
+            new Shop((int)$cart->id_shop)
+        );
+
+        $this->removeGiftPrice($cart, (int)$currentGift['product_id'], (int)$currentGift['attr_id']);
+        $this->clearGiftMeta($cart);
+    }
+
+    // =========================================================================
+    // PRECIO A CERO
+    // =========================================================================
+
+    private function setGiftPrice($cart, $productId, $attrId)
+    {
+        $this->removeGiftPrice($cart, $productId, $attrId);
+
+        $sp = new SpecificPrice();
+        $sp->id_product           = $productId;
+        $sp->id_product_attribute = $attrId;
+        $sp->id_cart              = (int)$cart->id;
+        $sp->id_shop              = (int)$cart->id_shop;
+        $sp->id_shop_group        = 0;
+        $sp->id_currency          = 0;
+        $sp->id_country           = 0;
+        $sp->id_group             = 0;
+        $sp->id_customer          = (int)$cart->id_customer;
+        $sp->price                = '0.000000';
+        $sp->from_quantity        = 1;
+        $sp->reduction            = '0.000000';
+        $sp->reduction_type       = 'amount';
+        $sp->reduction_tax        = 1;
+        $sp->from                 = '0000-00-00 00:00:00';
+        $sp->to                   = '0000-00-00 00:00:00';
+        $sp->add();
+    }
+
+    private function removeGiftPrice($cart, $productId, $attrId)
+    {
+        $rows = Db::getInstance()->executeS(
+            'SELECT `id_specific_price`
+             FROM `' . _DB_PREFIX_ . 'specific_price`
+             WHERE `id_product` = ' . (int)$productId . '
+               AND `id_product_attribute` = ' . (int)$attrId . '
+               AND `id_cart` = ' . (int)$cart->id . '
+               AND `price` = \'0.000000\''
+        );
+        if (!$rows) {
+            return;
+        }
+        foreach ($rows as $row) {
+            $sp = new SpecificPrice((int)$row['id_specific_price']);
+            if (Validate::isLoadedObject($sp)) {
+                $sp->delete();
+            }
+        }
+    }
+
+    // =========================================================================
+    // METADATOS DE REGALO EN SESIÓN (cookie)
+    // =========================================================================
+
+    private function markCartItemAsGift($cart, $productId, $attrId, $ruleId, $levelId)
+    {
+        $meta = array(
+            'cart_id'    => (int)$cart->id,
+            'product_id' => $productId,
+            'attr_id'    => $attrId,
+            'rule_id'    => $ruleId,
+            'level_id'   => $levelId,
+            'ts'         => time(),
+        );
+        $this->context->cookie->josra_gift_meta = json_encode($meta);
+        $this->context->cookie->write();
+    }
+
+    private function clearGiftMeta($cart)
+    {
+        $this->context->cookie->josra_gift_meta = '';
+        $this->context->cookie->write();
+    }
+
+    public function getCurrentGiftInCart($cart)
+    {
+        $metaRaw = isset($this->context->cookie->josra_gift_meta) ? $this->context->cookie->josra_gift_meta : '';
+        if (empty($metaRaw)) {
+            return null;
+        }
+
+        $meta = json_decode($metaRaw, true);
+        if (!$meta || (int)(isset($meta['cart_id']) ? $meta['cart_id'] : 0) !== (int)$cart->id) {
+            return null;
+        }
+
+        $products = $cart->getProducts();
+        foreach ($products as $p) {
+            if ((int)$p['id_product'] === (int)$meta['product_id']
+                && (int)$p['id_product_attribute'] === (int)$meta['attr_id']) {
+                return $meta;
+            }
+        }
+
+        $this->clearGiftMeta($cart);
+        return null;
+    }
+
+    public function isGiftProduct($cart, $productId, $attrId)
+    {
+        $current = $this->getCurrentGiftInCart($cart);
+        if (!$current) {
+            return false;
+        }
+        return (int)$current['product_id'] === (int)$productId
+            && (int)$current['attr_id'] === (int)$attrId;
+    }
+
+    private function isGiftCartRow($productRow)
+    {
+        $metaRaw = isset($this->context->cookie->josra_gift_meta) ? $this->context->cookie->josra_gift_meta : '';
+        if (empty($metaRaw)) {
+            return false;
+        }
+        $meta = json_decode($metaRaw, true);
+        if (!$meta) {
+            return false;
+        }
+        return (int)$productRow['id_product'] === (int)(isset($meta['product_id']) ? $meta['product_id'] : 0)
+            && (int)$productRow['id_product_attribute'] === (int)(isset($meta['attr_id']) ? $meta['attr_id'] : 0);
+    }
+
+    // =========================================================================
+    // SEGMENTACIÓN
+    // =========================================================================
+
+    private function filterRulesBySegmentation($rules, $cart)
+    {
+        $customerId = (int)$cart->id_customer;
+        $groupIds   = array((int)Configuration::get('PS_CUSTOMER_GROUP'));
+        $zoneId     = 0;
+
+        if ($customerId) {
+            $customer = new Customer($customerId);
+            if (Validate::isLoadedObject($customer)) {
+                $groupIds = $customer->getGroups();
+            }
+        }
+
+        if ($cart->id_address_delivery) {
+            $address = new Address((int)$cart->id_address_delivery);
+            if (Validate::isLoadedObject($address) && $address->id_country) {
+                $country = new Country((int)$address->id_country);
+                if (Validate::isLoadedObject($country)) {
+                    $zoneId = (int)$country->id_zone;
+                }
+            }
+        }
+
+        $filtered = array();
+        foreach ($rules as $rule) {
+            $ruleId       = (int)$rule['id_josra_gift_rule'];
+            $restrictions = JosraGiftRule::getRestrictionsByRuleId($ruleId);
+
+            if (empty($restrictions)) {
+                $filtered[] = $rule;
+                continue;
+            }
+
+            $groupRestrictions = array();
+            $zoneRestrictions  = array();
+            foreach ($restrictions as $r) {
+                if ($r['restriction_type'] === 'group') {
+                    $groupRestrictions[] = $r;
+                } else {
+                    $zoneRestrictions[] = $r;
+                }
+            }
+
+            $groupOk = empty($groupRestrictions);
+            $zoneOk  = empty($zoneRestrictions);
+
+            if (!empty($groupRestrictions)) {
+                $allowedGroups = array();
+                foreach ($groupRestrictions as $gr) {
+                    $allowedGroups[] = (int)$gr['id_value'];
+                }
+                $groupOk = !empty(array_intersect($groupIds, $allowedGroups));
+            }
+
+            if (!empty($zoneRestrictions) && $zoneId) {
+                $allowedZones = array();
+                foreach ($zoneRestrictions as $zr) {
+                    $allowedZones[] = (int)$zr['id_value'];
+                }
+                $zoneOk = in_array($zoneId, $allowedZones);
+            } elseif (!empty($zoneRestrictions) && !$zoneId) {
+                $zoneOk = false;
+            }
+
+            if ($groupOk && $zoneOk) {
+                $filtered[] = $rule;
+            }
+        }
+
+        return $filtered;
+    }
+
+    // =========================================================================
+    // MENSAJE MOTIVACIONAL
+    // =========================================================================
+
+    public function getNextRuleInfo($cart)
+    {
+        $rules = JosraGiftRule::getActiveRules();
+        if (empty($rules)) {
+            return null;
+        }
+
+        $rules = $this->filterRulesBySegmentation($rules, $cart);
+        if (empty($rules)) {
+            return null;
+        }
+
+        $rule      = $rules[0];
+        $cartValue = $this->getCartValue($cart, $rule);
+        $cartQty   = $this->getCartQuantity($cart);
+        $levels    = JosraGiftRule::getLevelsByRuleId((int)$rule['id_josra_gift_rule']);
+
+        foreach ($levels as $level) {
+            $threshold = (float)$level['trigger_value'];
+            if ($rule['trigger_type'] === 'quantity') {
+                $reached = ($cartQty >= $threshold);
+            } else {
+                $reached = ($cartValue >= $threshold);
+            }
+
+            if (!$reached) {
+                if ($rule['trigger_type'] === 'quantity') {
+                    $missing = $threshold - $cartQty;
+                } else {
+                    $missing = $threshold - $cartValue;
+                }
+                return array(
+                    'rule'           => $rule,
+                    'level'          => $level,
+                    'amount_missing' => round($missing, 2),
+                    'trigger_type'   => $rule['trigger_type'],
+                );
+            }
+        }
+
+        return null;
+    }
+
+    // =========================================================================
+    // LOG EN PEDIDO
+    // =========================================================================
+
+    public function logOrderGift($order, $cart)
+    {
+        $currentGift = $this->getCurrentGiftInCart($cart);
+        if (!$currentGift) {
+            return;
+        }
+
+        $productId = (int)$currentGift['product_id'];
+        $attrId    = (int)$currentGift['attr_id'];
+        $ruleId    = (int)$currentGift['rule_id'];
+        $levelId   = (int)$currentGift['level_id'];
+
+        $product = new Product($productId, false, $this->context->language->id);
+        $rule    = new JosraGiftRule($ruleId);
+
+        if ($attrId) {
+            $originalPrice = Product::getPriceStatic($productId, false, $attrId);
+        } else {
+            $originalPrice = Product::getPriceStatic($productId, false);
+        }
+
+        $log                        = new JosraGiftOrderLog();
+        $log->id_order              = (int)$order->id;
+        $log->id_cart               = (int)$cart->id;
+        $log->id_josra_gift_rule    = $ruleId;
+        $log->id_josra_gift_rule_level = $levelId;
+        $log->id_product            = $productId;
+        $log->id_product_attribute  = $attrId;
+        $log->product_name          = Validate::isLoadedObject($product) ? $product->name : '';
+        $log->original_price        = (float)$originalPrice;
+        $log->rule_name             = Validate::isLoadedObject($rule) ? $rule->name : '';
+        $log->date_add              = date('Y-m-d H:i:s');
+        $log->add();
+
+        JosraGiftRule::incrementUses($ruleId);
+        $this->clearGiftMeta($cart);
+    }
+
+    // =========================================================================
+    // DEVOLUCIÓN
+    // =========================================================================
+
+    public function handleReturn($orderReturn)
+    {
+        if (!isset($orderReturn->id_order)) {
+            return;
+        }
+        $log = JosraGiftOrderLog::getByOrderId((int)$orderReturn->id_order);
+        if ($log) {
+            Db::getInstance()->execute(
+                'UPDATE `' . _DB_PREFIX_ . 'josra_gift_rule`
+                 SET `uses_count` = GREATEST(0, `uses_count` - 1)
+                 WHERE `id_josra_gift_rule` = ' . (int)$log['id_josra_gift_rule']
+            );
+        }
+    }
+}

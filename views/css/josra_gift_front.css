@@ -1,0 +1,155 @@
+/* ============================================================
+   josra_giftproduct - Frontend CSS
+   Badge de regalo, aviso de borrado, toast de desbloqueo
+   ============================================================ */
+
+/* ----- Badge "REGALO" ----- */
+.josra-gift-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.4;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 6px;
+    vertical-align: middle;
+    /* colores inyectados inline desde PHP */
+}
+
+/* ----- Aviso de regalo eliminado ----- */
+.josra-gift-notice {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.josra-gift-notice--warning {
+    background-color: #fff8e6;
+    border: 1px solid #f5c842;
+    color: #7a5c00;
+}
+
+.josra-gift-notice__icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.josra-gift-notice__text {
+    flex: 1;
+}
+
+.josra-gift-notice__btn {
+    background-color: #e74c3c;
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.2s ease;
+}
+
+.josra-gift-notice__btn:hover {
+    background-color: #c0392b;
+}
+
+.josra-gift-notice__btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.josra-gift-notice__close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    color: #999;
+    padding: 0 4px;
+    flex-shrink: 0;
+}
+
+.josra-gift-notice__close:hover {
+    color: #333;
+}
+
+/* ----- Mensaje motivacional "te faltan X€" ----- */
+.josra-gift-motivational {
+    background-color: #f0f8ff;
+    border: 1px dashed #aad4f5;
+    border-radius: 4px;
+    padding: 10px 16px;
+    margin: 12px 0;
+    font-size: 13px;
+    color: #1a5276;
+    text-align: center;
+}
+
+.josra-gift-motivational__icon {
+    margin-right: 6px;
+}
+
+/* ----- Toast de regalo desbloqueado ----- */
+.josra-gift-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 99999;
+    background-color: #27ae60;
+    color: #fff;
+    padding: 14px 20px;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    pointer-events: none;
+    max-width: 320px;
+}
+
+.josra-gift-toast--visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* ----- Precio del regalo en carrito ----- */
+.josra-gift-price-zero {
+    color: #27ae60;
+    font-weight: 700;
+}
+
+/* ----- Fila de regalo en carrito (destacar fila) ----- */
+tr[data-josra-gift="1"],
+.josra-gift-row {
+    background-color: #f9fdf5 !important;
+}
+
+/* ----- Responsive ----- */
+@media (max-width: 576px) {
+    .josra-gift-toast {
+        bottom: 12px;
+        right: 12px;
+        left: 12px;
+        max-width: none;
+    }
+
+    .josra-gift-notice {
+        flex-wrap: wrap;
+    }
+
+    .josra-gift-notice__btn {
+        width: 100%;
+        text-align: center;
+    }
+}
