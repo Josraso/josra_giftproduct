@@ -81,8 +81,10 @@
                                 <td>
                                     {if $rule.trigger_type == 'amount'}
                                         <span class="badge badge-primary">{l s='Importe' mod='josra_giftproduct'}</span>
-                                    {else}
+                                    {elseif $rule.trigger_type == 'quantity'}
                                         <span class="badge badge-default">{l s='Cantidad' mod='josra_giftproduct'}</span>
+                                    {else}
+                                        <span class="badge badge-success">{l s='Producto' mod='josra_giftproduct'}</span>
                                     {/if}
                                 </td>
                                 <td>

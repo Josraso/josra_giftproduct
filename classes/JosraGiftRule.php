@@ -32,8 +32,10 @@ class JosraGiftRule extends ObjectModel
         'fields'  => array(
             'name'             => array('type' => self::TYPE_STRING,  'required' => true, 'size' => 128),
             'active'           => array('type' => self::TYPE_BOOL,    'validate' => 'isBool'),
-            'trigger_type'     => array('type' => self::TYPE_STRING,  'validate' => 'isGenericName'),
-            'calc_mode'        => array('type' => self::TYPE_STRING,  'validate' => 'isGenericName'),
+            'trigger_type'       => array('type' => self::TYPE_STRING,  'validate' => 'isGenericName'),
+            'id_trigger_product' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'),
+            'trigger_min_qty'    => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'),
+            'calc_mode'          => array('type' => self::TYPE_STRING,  'validate' => 'isGenericName'),
             'include_shipping' => array('type' => self::TYPE_BOOL,    'validate' => 'isBool'),
             'date_start'       => array('type' => self::TYPE_DATE,    'validate' => 'isDate', 'copy_post' => false),
             'date_end'         => array('type' => self::TYPE_DATE,    'validate' => 'isDate', 'copy_post' => false),

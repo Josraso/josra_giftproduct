@@ -196,6 +196,7 @@
             '<select id="josra-rule-trigger-type" class="form-control" style="width:auto">',
             '<option value="amount">Por importe del carrito (€)</option>',
             '<option value="quantity">Por cantidad de productos</option>',
+            '<option value="product">Por producto en carrito</option>',
             '</select>',
             '</div></div>',
 
@@ -215,6 +216,27 @@
             '<div class="col-lg-9"><div class="checkbox"><label>',
             '<input type="checkbox" id="josra-rule-include-shipping"> Sumar el coste de envío al importe',
             '</label></div></div></div>',
+
+            // Producto disparador (solo para trigger_type=product)
+            '<div class="form-group josra-product-trigger-only" style="display:none;">',
+            '<label class="control-label col-lg-3">Producto disparador</label>',
+            '<div class="col-lg-9">',
+            '<div class="josra-product-picker" id="josra-trigger-product-picker">',
+            '<input type="text" class="form-control" id="josra-trigger-product-search"',
+            '       placeholder="Busca el producto que activa el regalo..."',
+            '       autocomplete="off">',
+            '<div id="josra-trigger-product-results" style="display:none;"></div>',
+            '<input type="hidden" id="josra-trigger-product-id" value="">',
+            '</div>',
+            '</div></div>',
+
+            '<div class="form-group josra-product-trigger-only" style="display:none;">',
+            '<label class="control-label col-lg-3">Cantidad mínima en carrito</label>',
+            '<div class="col-lg-3">',
+            '<input type="number" id="josra-rule-trigger-min-qty" class="form-control" value="1" min="1" step="1">',
+            '</div>',
+            '<div class="col-lg-6"><p class="help-block">El cliente debe tener al menos esta cantidad del producto en el carrito.</p></div>',
+            '</div>',
 
             // Prioridad
             '<div class="form-group">',
@@ -282,6 +304,17 @@
 
         toggleAmountOnlyFields(rule.trigger_type);
 
+        // Restaurar campos de producto disparador
+        if (rule.trigger_type === 'product') {
+            if (rule.id_trigger_product) {
+                $('#josra-trigger-product-id').val(rule.id_trigger_product);
+                if (rule.trigger_product_name) {
+                    $('#josra-trigger-product-search').val(rule.trigger_product_name);
+                }
+            }
+            $('#josra-rule-trigger-min-qty').val(rule.trigger_min_qty || 1);
+        }
+
         // Tramos
         levels.forEach(function (level) {
             addLevelRow(level);
@@ -322,6 +355,20 @@
             $(this).closest('.josra-restriction-row').remove();
         });
 
+        // Buscador de producto disparador (trigger)
+        $(document).off('input.josra-trigger').on('input.josra-trigger', '#josra-trigger-product-search', debounce(function () {
+            var $input   = $(this);
+            var $results = $('#josra-trigger-product-results');
+            var q        = $input.val().trim();
+            if (q.length < 2) {
+                $results.hide().empty();
+                return;
+            }
+            adminAjax({ action: 'search_product', q: q }, function (products) {
+                renderTriggerProductResults($results, products, $input);
+            });
+        }, 300));
+
         // Buscador de productos
         $(document).off('input.josra-product').on('input.josra-product', '.josra-product-search', debounce(function () {
             var $input   = $(this);
@@ -340,8 +387,17 @@
     function toggleAmountOnlyFields(triggerType) {
         if (triggerType === 'amount') {
             $('.josra-amount-only').show();
-        } else {
+            $('.josra-product-trigger-only').hide();
+            $('.josra-level-trigger-value').closest('.col-lg-3').show();
+        } else if (triggerType === 'quantity') {
             $('.josra-amount-only').hide();
+            $('.josra-product-trigger-only').hide();
+            $('.josra-level-trigger-value').closest('.col-lg-3').show();
+        } else if (triggerType === 'product') {
+            $('.josra-amount-only').hide();
+            $('.josra-product-trigger-only').show();
+            // Para tipo product, ocultar el campo trigger_value del tramo (no aplica)
+            $('.josra-level-trigger-value').closest('.col-lg-3').hide();
         }
     }
 
@@ -366,7 +422,7 @@
             '       min="0" step="0.01" placeholder="0.00">',
             '</div>',
 
-            '<div class="col-lg-8">',
+            '<div class="col-lg-6">',
             '<label>Producto regalo</label>',
             '<div class="josra-product-picker">',
             '<input type="text" class="form-control josra-product-search"',
@@ -386,6 +442,13 @@
             '</select>',
             '</div>',
 
+            '</div>',
+
+            '<div class="col-lg-2 josra-gift-qty-wrap">',
+            '<label>Uds. a regalar</label>',
+            '<input type="number" class="form-control josra-level-gift-qty"',
+            '       value="' + (data.gift_qty || 1) + '"',
+            '       min="1" step="1">',
             '</div>',
 
             '<div class="col-lg-1" style="padding-top:24px;">',
@@ -458,6 +521,36 @@
         });
     }
 
+    function renderTriggerProductResults($container, products, $input) {
+        $container.empty();
+        if (!products || products.length === 0) {
+            $container.html('<div class="josra-no-results">Sin resultados</div>').show();
+            return;
+        }
+        products.forEach(function (p) {
+            var $item = $('<div class="josra-product-result-item">')
+                .html([
+                    p.image_url ? '<img src="' + p.image_url + '" alt="" class="josra-result-img">' : '',
+                    '<div class="josra-result-info">',
+                    '<strong>' + escHtml(p.name) + '</strong>',
+                    p.reference ? '<small> — ' + escHtml(p.reference) + '</small>' : '',
+                    '</div>',
+                ].join(''))
+                .on('click', function () {
+                    $input.val(p.name);
+                    $('#josra-trigger-product-id').val(p.id);
+                    $container.hide().empty();
+                });
+            $container.append($item);
+        });
+        $container.show();
+        $(document).one('click', function (e) {
+            if (!$(e.target).closest('#josra-trigger-product-picker').length) {
+                $container.hide();
+            }
+        });
+    }
+
     function loadCombinations(productId, $select, selectedAttrId) {
         adminAjax({ action: 'get_combinations', id_product: productId }, function (combinations) {
             $select.empty().append('<option value="0">Sin combinación / única</option>');
@@ -523,16 +616,19 @@
 
         // Recoger tramos
         var levels = [];
+        var triggerType = $('#josra-rule-trigger-type').val();
         $('.josra-level-row').each(function () {
             var triggerVal = $(this).find('.josra-level-trigger-value').val();
             var productId  = $(this).find('.josra-level-product-id').val();
             var attrId     = $(this).find('.josra-combination-select').val() || $(this).find('.josra-level-attr-id').val() || 0;
+            var giftQty    = parseInt($(this).find('.josra-level-gift-qty').val()) || 1;
 
-            if (triggerVal && productId) {
+            if ((triggerType !== 'product' ? triggerVal : true) && productId) {
                 levels.push({
-                    trigger_value:        parseFloat(triggerVal),
+                    trigger_value:        parseFloat(triggerVal) || 0,
                     id_product:           parseInt(productId),
                     id_product_attribute: parseInt(attrId),
+                    gift_qty:             giftQty,
                 });
             }
         });
@@ -553,19 +649,21 @@
         });
 
         var payload = {
-            action:            'save_rule',
+            action:             'save_rule',
             id_josra_gift_rule: ruleId,
-            name:              name,
-            active:            $('#josra-rule-active').is(':checked') ? 1 : 0,
-            trigger_type:      $('#josra-rule-trigger-type').val(),
-            calc_mode:         $('#josra-rule-calc-mode').val(),
-            include_shipping:  $('#josra-rule-include-shipping').is(':checked') ? 1 : 0,
-            priority:          parseInt($('#josra-rule-priority').val()) || 0,
-            date_start:        $('#josra-rule-date-start').val(),
-            date_end:          $('#josra-rule-date-end').val(),
-            max_uses:          $('#josra-rule-max-uses').val(),
-            levels:            JSON.stringify(levels),
-            restrictions:      JSON.stringify(restrictions),
+            name:               name,
+            active:             $('#josra-rule-active').is(':checked') ? 1 : 0,
+            trigger_type:       triggerType,
+            calc_mode:          $('#josra-rule-calc-mode').val(),
+            include_shipping:   $('#josra-rule-include-shipping').is(':checked') ? 1 : 0,
+            priority:           parseInt($('#josra-rule-priority').val()) || 0,
+            date_start:         $('#josra-rule-date-start').val(),
+            date_end:           $('#josra-rule-date-end').val(),
+            max_uses:           $('#josra-rule-max-uses').val(),
+            levels:             JSON.stringify(levels),
+            restrictions:       JSON.stringify(restrictions),
+            id_trigger_product: (triggerType === 'product') ? parseInt($('#josra-trigger-product-id').val()) || 0 : 0,
+            trigger_min_qty:    (triggerType === 'product') ? parseInt($('#josra-rule-trigger-min-qty').val()) || 1 : 1,
         };
 
         var $btn = $('#josra-rule-save-btn').prop('disabled', true).text('Guardando...');

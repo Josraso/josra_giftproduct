@@ -25,7 +25,7 @@ class Josra_giftproduct extends Module
     {
         $this->name            = 'josra_giftproduct';
         $this->tab             = 'pricing_promotion';
-        $this->version         = '1.0.0';
+        $this->version         = '1.1.0';
         $this->author          = 'josra';
         $this->need_instance   = 1;
         $this->bootstrap       = true;
@@ -79,6 +79,23 @@ class Josra_giftproduct extends Module
         $this->uninstallDb();
         $this->deleteConfig();
         return parent::uninstall();
+    }
+
+    public function upgrade($currentVersion, $newVersion)
+    {
+        $sqlFile = dirname(__FILE__) . '/sql/upgrade.sql';
+        if (!file_exists($sqlFile)) {
+            return true;
+        }
+        $sql = Tools::file_get_contents($sqlFile);
+        $sql = str_replace('PREFIX_', _DB_PREFIX_, $sql);
+        $queries = array_filter(array_map('trim', explode(';', $sql)));
+        foreach ($queries as $query) {
+            if (!empty($query)) {
+                Db::getInstance()->execute($query);
+            }
+        }
+        return true;
     }
 
     private function installDb()
@@ -317,22 +334,22 @@ class Josra_giftproduct extends Module
 
         $deletedFlag = $this->context->cookie->josra_gift_deleted ? (int)$this->context->cookie->josra_gift_deleted : 0;
 
-        Media::addJsDef(array(
-            'josraGift' => array(
-                'ajax_url'        => $this->context->link->getModuleLink($this->name, 'ajax', array(), true),
-                'badge_text'      => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
-                'restore_label'   => $this->l('Restaurar mi regalo'),
-                'deleted_warning' => $this->l('Has eliminado tu producto de regalo.'),
-                'unlocked_msg'    => $this->l('¡Has desbloqueado un regalo!'),
-                'upgraded_msg'    => $this->l('¡Has conseguido un regalo mejor!'),
-                'gift_deleted'    => $deletedFlag,
-            ),
+        $this->context->smarty->assign(array(
+            'josra_ajax_url'        => $this->context->link->getModuleLink($this->name, 'ajax', array(), true),
+            'josra_badge_text'      => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
+            'josra_restore_label'   => $this->l('Restaurar mi regalo'),
+            'josra_deleted_warning' => $this->l('Has eliminado tu producto de regalo.'),
+            'josra_unlocked_msg'    => $this->l('¡Has desbloqueado un regalo!'),
+            'josra_upgraded_msg'    => $this->l('¡Has conseguido un regalo mejor!'),
+            'josra_gift_deleted'    => $deletedFlag,
         ));
 
         if ($this->context->cookie->josra_gift_deleted) {
             $this->context->cookie->josra_gift_deleted = 0;
             $this->context->cookie->write();
         }
+
+        return $this->display(__FILE__, 'views/templates/hook/header_js.tpl');
     }
 
     public function hookDisplayShoppingCartFooter($params)

@@ -142,10 +142,12 @@ class AdminJosraGiftAjaxController extends ModuleAdminController
         $calcModeVal    = Tools::getValue('calc_mode');
         $rule->name             = pSQL(Tools::getValue('name', ''));
         $rule->active           = (int)Tools::getValue('active', 1);
-        $rule->trigger_type     = in_array($triggerTypeVal, array('amount', 'quantity')) ? $triggerTypeVal : 'amount';
+        $rule->trigger_type     = in_array($triggerTypeVal, array('amount', 'quantity', 'product')) ? $triggerTypeVal : 'amount';
         $rule->calc_mode        = in_array($calcModeVal, array('without_tax', 'with_tax')) ? $calcModeVal : 'without_tax';
         $rule->include_shipping = (int)Tools::getValue('include_shipping', 0);
-        $rule->priority         = (int)Tools::getValue('priority', 0);
+        $rule->priority              = (int)Tools::getValue('priority', 0);
+        $rule->id_trigger_product    = (int)Tools::getValue('id_trigger_product', 0);
+        $rule->trigger_min_qty       = max(1, (int)Tools::getValue('trigger_min_qty', 1));
 
         $dateStart = Tools::getValue('date_start', '');
         $dateEnd   = Tools::getValue('date_end', '');
@@ -232,9 +234,21 @@ class AdminJosraGiftAjaxController extends ModuleAdminController
             $this->jsonResponse(array('error' => 'Regla no encontrada'), 404);
             return;
         }
+        $ruleArray = (array)$rule;
+        $triggerProductName = '';
+        if ($rule->trigger_type === 'product' && $rule->id_trigger_product) {
+            $idLang = (int)$this->context->language->id;
+            $triggerProductName = (string)Db::getInstance()->getValue(
+                'SELECT `name` FROM `' . _DB_PREFIX_ . 'product_lang`
+                 WHERE `id_product` = ' . (int)$rule->id_trigger_product . '
+                   AND `id_lang` = ' . $idLang
+            );
+        }
+        $ruleArray['trigger_product_name'] = $triggerProductName;
+
         $this->jsonResponse(array(
-            'rule'         => (array)$rule,
-            'levels'       => JosraGiftRule::getLevelsByRuleId($ruleId),
+            'rule'         => $ruleArray,
+            'levels'       => JosraGiftRule::getLevelsByRuleId($ruleId, (int)$this->context->language->id),
             'restrictions' => JosraGiftRule::getRestrictionsByRuleId($ruleId),
         ));
     }
