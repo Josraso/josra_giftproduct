@@ -123,6 +123,17 @@
     transform: translateY(0);
 }
 
+/* ----- Bloquear selector de cantidad en fila de regalo ----- */
+/* :has() soportado en Chrome 105+, Firefox 121+, Safari 15.4+ */
+li.cart-item:has(.josra-gift-badge) .product-quantity,
+li.cart-item:has(.josra-gift-badge) .input-group.bootstrap-touchspin,
+article.cart-item:has(.josra-gift-badge) .product-quantity,
+tr:has(.josra-gift-badge) .product-quantity,
+tr:has(.josra-gift-badge) .cart_quantity {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
 /* ----- Precio del regalo en carrito ----- */
 .josra-gift-price-zero {
     color: #27ae60;

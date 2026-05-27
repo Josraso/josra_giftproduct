@@ -15,6 +15,7 @@
         init: function () {
             this.applyBadgeColors();
             this.positionBadges();
+            this.lockGiftQuantity();
             this.injectMotivationalMessage();
             this.checkGiftDeleted();
             this.checkGiftUnlocked();
@@ -57,6 +58,49 @@
                 if (priceEl && priceEl.parentNode) {
                     priceEl.parentNode.insertBefore(badge, priceEl.nextSibling);
                 }
+            });
+        },
+
+        // =====================================================================
+        // BLOQUEAR CANTIDAD DEL PRODUCTO REGALO
+        // =====================================================================
+
+        lockGiftQuantity: function () {
+            document.querySelectorAll('.josra-gift-badge').forEach(function (badge) {
+                var row = badge.closest(
+                    'li.cart-item, article.cart-item, .cart_item, tr.cart_item, [class*="cart-item"]'
+                );
+                if (!row) return;
+
+                // Ocultar el wrapper de cantidad (Touchspin / Bootstrap input-group)
+                var qtyWrap = row.querySelector(
+                    '.product-quantity, .input-group.bootstrap-touchspin, ' +
+                    '.cart_quantity, .qty-box, .qty'
+                );
+                if (qtyWrap) {
+                    qtyWrap.style.visibility = 'hidden';
+                    qtyWrap.style.pointerEvents = 'none';
+                }
+
+                // Por si el tema usa un input suelto
+                var qtyInput = row.querySelector(
+                    '.js-cart-line-product-quantity, .cart_quantity_input, ' +
+                    'input[name^="qty"], input[data-product-id]'
+                );
+                if (qtyInput) {
+                    qtyInput.readOnly = true;
+                    qtyInput.style.pointerEvents = 'none';
+                }
+
+                // Botones +/- individuales
+                row.querySelectorAll(
+                    '.touchspin-up, .touchspin-down, ' +
+                    '.js-increase-product-quantity, .js-decrease-product-quantity, ' +
+                    '[class*="increase"], [class*="decrease"]'
+                ).forEach(function (btn) {
+                    btn.disabled = true;
+                    btn.style.pointerEvents = 'none';
+                });
             });
         },
 
@@ -188,6 +232,7 @@
                 setTimeout(function () {
                     josraGift.applyBadgeColors();
                     josraGift.positionBadges();
+                    josraGift.lockGiftQuantity();
                     josraGift.checkDeletedViaAjax();
                 }, 400);
             });

@@ -135,6 +135,21 @@ class JosraGiftManager
         if ($currentGift) {
             if ((int)$currentGift['product_id'] === (int)$giftProduct['id_product']
                 && (int)$currentGift['attr_id'] === (int)$giftProduct['id_product_attribute']) {
+                // Verificar que la cantidad no haya sido manipulada manualmente
+                $expectedQty = max(1, (int)$giftProduct['gift_qty']);
+                $actualQty   = $this->getRawGiftQtyInCart($cart, $giftProduct['id_product'], $giftProduct['id_product_attribute']);
+                if ($actualQty > $expectedQty) {
+                    self::log('qty regalo manipulada (' . $actualQty . ' > ' . $expectedQty . '), restaurando');
+                    $cart->updateQty(
+                        $actualQty - $expectedQty,
+                        (int)$giftProduct['id_product'],
+                        (int)$giftProduct['id_product_attribute'],
+                        false,
+                        'down',
+                        0,
+                        null
+                    );
+                }
                 self::log('regalo correcto ya en carrito, nada que hacer');
                 return;
             }
@@ -183,6 +198,17 @@ class JosraGiftManager
             $total += (int)$product['cart_quantity'];
         }
         return $total;
+    }
+
+    private function getRawGiftQtyInCart($cart, $productId, $attrId)
+    {
+        foreach ($cart->getProducts() as $p) {
+            if ((int)$p['id_product'] === (int)$productId
+                && (int)$p['id_product_attribute'] === (int)$attrId) {
+                return (int)$p['cart_quantity'];
+            }
+        }
+        return 0;
     }
 
     private function getCartQtyForProduct($cart, $productId)
