@@ -128,6 +128,12 @@
             });
         });
 
+        // Ver detalle (abre modal igual que Editar)
+        $(document).on('click', '.josra-btn-view-levels', function (e) {
+            e.preventDefault();
+            openRuleModal(parseInt($(this).data('id')));
+        });
+
         // Toggle activo
         $(document).on('click', '.josra-gift-toggle-active', function () {
             var id = $(this).data('id');
@@ -353,6 +359,31 @@
         // Borrar restricción
         $(document).off('click.josra-restr').on('click.josra-restr', '.josra-remove-restriction', function () {
             $(this).closest('.josra-restriction-row').remove();
+        });
+
+        // Búsqueda de restricciones (grupos / zonas)
+        $(document).off('input.josra-restr-search').on('input.josra-restr-search', '.josra-restriction-search', debounce(function () {
+            var $input   = $(this);
+            var $row     = $input.closest('.josra-restriction-row');
+            var $results = $row.find('.josra-restriction-results');
+            var type     = $row.find('.josra-restriction-type').val();
+            var q        = $input.val().trim();
+            if (q.length < 1) {
+                $results.hide().empty();
+                return;
+            }
+            var ajaxAction = (type === 'zone') ? 'get_zones' : 'get_groups';
+            adminAjax({ action: ajaxAction, q: q }, function (items) {
+                renderRestrictionResults($results, items, $input, $row);
+            });
+        }, 300));
+
+        // Al cambiar el tipo, limpiar búsqueda actual
+        $(document).off('change.josra-restr-type').on('change.josra-restr-type', '.josra-restriction-type', function () {
+            var $row = $(this).closest('.josra-restriction-row');
+            $row.find('.josra-restriction-search').val('');
+            $row.find('.josra-restriction-value').val('');
+            $row.find('.josra-restriction-results').hide().empty();
         });
 
         // Buscador de producto disparador (trigger)
@@ -581,16 +612,25 @@
             '<div class="josra-restriction-row row" style="margin-bottom:8px;">',
             '<div class="col-lg-4">',
             '<select class="form-control josra-restriction-type">',
-            '<option value="group" ' + (data.restriction_type === 'group' ? 'selected' : '') + '>Grupo de clientes</option>',
-            '<option value="zone"  ' + (data.restriction_type === 'zone'  ? 'selected' : '') + '>Zona geográfica</option>',
+            '<option value="group"' + (data.restriction_type === 'group' ? ' selected' : '') + '>Grupo de clientes</option>',
+            '<option value="zone"'  + (data.restriction_type === 'zone'  ? ' selected' : '') + '>Zona geográfica</option>',
             '</select>',
             '</div>',
             '<div class="col-lg-6">',
-            '<input type="number" class="form-control josra-restriction-value"',
-            '       value="' + (data.id_value || '') + '"',
-            '       placeholder="ID del grupo o zona de PrestaShop">',
+            '<div class="josra-restriction-picker" style="position:relative;">',
+            '<input type="text" class="form-control josra-restriction-search"',
+            '       value="' + escHtml(data.value_name || '') + '"',
+            '       placeholder="Buscar por nombre..."',
+            '       autocomplete="off">',
+            '<div class="josra-restriction-results"',
+            '     style="display:none;position:absolute;z-index:1050;width:100%;',
+            '            background:#fff;border:1px solid #ccc;border-top:none;',
+            '            max-height:180px;overflow-y:auto;box-shadow:0 4px 8px rgba(0,0,0,.1);">',
             '</div>',
-            '<div class="col-lg-1">',
+            '<input type="hidden" class="josra-restriction-value" value="' + escHtml(String(data.id_value || '')) + '">',
+            '</div>',
+            '</div>',
+            '<div class="col-lg-1" style="padding-top:0;">',
             '<button type="button" class="btn btn-danger btn-sm josra-remove-restriction">',
             '<i class="icon-trash"></i>',
             '</button>',
@@ -599,6 +639,37 @@
         ].join('');
 
         $('#josra-restrictions-container').append(html);
+    }
+
+    function renderRestrictionResults($container, items, $input, $row) {
+        $container.empty();
+        if (!items || items.length === 0) {
+            $container.html('<div style="padding:8px 10px;color:#999;">Sin resultados</div>').show();
+            return;
+        }
+        items.forEach(function (item) {
+            var id   = item.id_group !== undefined ? item.id_group : item.id_zone;
+            var name = item.name;
+            var $item = $('<div>')
+                .css({ padding: '7px 10px', cursor: 'pointer' })
+                .text(name)
+                .hover(
+                    function () { $(this).css('background', '#f0f0f0'); },
+                    function () { $(this).css('background', ''); }
+                )
+                .on('click', function () {
+                    $input.val(name);
+                    $row.find('.josra-restriction-value').val(id);
+                    $container.hide().empty();
+                });
+            $container.append($item);
+        });
+        $container.show();
+        $(document).one('click.josra-restr-close', function (e) {
+            if (!$(e.target).closest('.josra-restriction-picker').length) {
+                $container.hide();
+            }
+        });
     }
 
     // =========================================================================

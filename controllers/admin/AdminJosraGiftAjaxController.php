@@ -37,6 +37,8 @@ class AdminJosraGiftAjaxController extends ModuleAdminController
             case 'toggle_rule':       $this->actionToggleRule();      break;
             case 'get_rule':          $this->actionGetRule();         break;
             case 'get_stats':         $this->actionGetStats();        break;
+            case 'get_groups':        $this->actionGetGroups();       break;
+            case 'get_zones':         $this->actionGetZones();        break;
             default: $this->jsonResponse(array('error' => 'Unknown action'), 400);
         }
     }
@@ -246,11 +248,62 @@ class AdminJosraGiftAjaxController extends ModuleAdminController
         }
         $ruleArray['trigger_product_name'] = $triggerProductName;
 
+        $idLang      = (int)$this->context->language->id;
+        $restrictions = JosraGiftRule::getRestrictionsByRuleId($ruleId);
+        foreach ($restrictions as &$r) {
+            if ($r['restriction_type'] === 'group') {
+                $r['value_name'] = (string)Db::getInstance()->getValue(
+                    'SELECT `name` FROM `' . _DB_PREFIX_ . 'group_lang`
+                     WHERE `id_group` = ' . (int)$r['id_value'] . '
+                       AND `id_lang` = ' . $idLang
+                );
+            } elseif ($r['restriction_type'] === 'zone') {
+                $r['value_name'] = (string)Db::getInstance()->getValue(
+                    'SELECT `name` FROM `' . _DB_PREFIX_ . 'zone`
+                     WHERE `id_zone` = ' . (int)$r['id_value']
+                );
+            } else {
+                $r['value_name'] = '';
+            }
+        }
+        unset($r);
+
         $this->jsonResponse(array(
             'rule'         => $ruleArray,
-            'levels'       => JosraGiftRule::getLevelsByRuleId($ruleId, (int)$this->context->language->id),
-            'restrictions' => JosraGiftRule::getRestrictionsByRuleId($ruleId),
+            'levels'       => JosraGiftRule::getLevelsByRuleId($ruleId, $idLang),
+            'restrictions' => $restrictions,
         ));
+    }
+
+    private function actionGetGroups()
+    {
+        $q      = pSQL(Tools::getValue('q', ''));
+        $idLang = (int)$this->context->language->id;
+        $results = Db::getInstance()->executeS(
+            'SELECT g.`id_group`, gl.`name`
+             FROM `' . _DB_PREFIX_ . 'group` g
+             INNER JOIN `' . _DB_PREFIX_ . 'group_lang` gl
+                     ON gl.`id_group` = g.`id_group`
+                    AND gl.`id_lang` = ' . $idLang . '
+             WHERE gl.`name` LIKE \'%' . $q . '%\'
+             ORDER BY gl.`name` ASC
+             LIMIT 20'
+        );
+        $this->jsonResponse(is_array($results) ? $results : array());
+    }
+
+    private function actionGetZones()
+    {
+        $q = pSQL(Tools::getValue('q', ''));
+        $results = Db::getInstance()->executeS(
+            'SELECT z.`id_zone`, z.`name`
+             FROM `' . _DB_PREFIX_ . 'zone` z
+             WHERE z.`name` LIKE \'%' . $q . '%\'
+               AND z.`active` = 1
+             ORDER BY z.`name` ASC
+             LIMIT 20'
+        );
+        $this->jsonResponse(is_array($results) ? $results : array());
     }
 
     private function actionGetStats()

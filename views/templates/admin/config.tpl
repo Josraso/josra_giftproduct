@@ -88,10 +88,10 @@
                                     {/if}
                                 </td>
                                 <td>
-                                    {* Aquí podríamos mostrar resumen de tramos - simplificado *}
-                                    <span class="label label-info">
+                                    <a href="#" class="label label-info josra-btn-view-levels"
+                                       data-id="{$rule.id_josra_gift_rule}">
                                         {l s='Ver detalle' mod='josra_giftproduct'}
-                                    </span>
+                                    </a>
                                 </td>
                                 <td>
                                     {if $rule.date_start || $rule.date_end}
@@ -394,7 +394,7 @@
                         <div class="col-lg-3 col-md-6">
                             <div class="josra-kpi">
                                 <div class="josra-kpi__value" id="stat-total-value">
-                                    {displayPrice price=$stats.total_gifted_value}
+                                    {$stats.total_gifted_value|string_format:"%.2f"} €
                                 </div>
                                 <div class="josra-kpi__label">{l s='Valor total regalado' mod='josra_giftproduct'}</div>
                             </div>
