@@ -469,14 +469,22 @@ class JosraGiftManager
     private function filterRulesBySegmentation($rules, $cart)
     {
         $customerId = (int)$cart->id_customer;
-        $groupIds   = array((int)Configuration::get('PS_CUSTOMER_GROUP'));
+        $groupIds   = array();
         $zoneId     = 0;
 
-        if ($customerId) {
+        if ($customerId > 0) {
             $customer = new Customer($customerId);
             if (Validate::isLoadedObject($customer)) {
                 $groupIds = $customer->getGroups();
             }
+        }
+        // Para visitantes no logueados, Customer::getGroupsStatic(0) devuelve
+        // PS_UNIDENTIFIED_LANG_GROUP (grupo Visitante, ID 1 por defecto).
+        if (empty($groupIds)) {
+            $groupIds = $this->context->customer->getGroups();
+        }
+        if (empty($groupIds)) {
+            $groupIds = array((int)Configuration::get('PS_UNIDENTIFIED_LANG_GROUP'));
         }
 
         if ($cart->id_address_delivery) {
@@ -488,6 +496,8 @@ class JosraGiftManager
                 }
             }
         }
+
+        self::log('segmentacion: groupIds=[' . implode(',', $groupIds) . '] zoneId=' . $zoneId);
 
         $filtered = array();
         foreach ($rules as $rule) {
@@ -503,9 +513,9 @@ class JosraGiftManager
             $zoneRestrictions  = array();
             foreach ($restrictions as $r) {
                 if ($r['restriction_type'] === 'group') {
-                    $groupRestrictions[] = $r;
+                    $groupRestrictions[] = (int)$r['id_value'];
                 } else {
-                    $zoneRestrictions[] = $r;
+                    $zoneRestrictions[] = (int)$r['id_value'];
                 }
             }
 
@@ -513,22 +523,20 @@ class JosraGiftManager
             $zoneOk  = empty($zoneRestrictions);
 
             if (!empty($groupRestrictions)) {
-                $allowedGroups = array();
-                foreach ($groupRestrictions as $gr) {
-                    $allowedGroups[] = (int)$gr['id_value'];
-                }
-                $groupOk = !empty(array_intersect($groupIds, $allowedGroups));
+                $groupOk = !empty(array_intersect($groupIds, $groupRestrictions));
             }
 
-            if (!empty($zoneRestrictions) && $zoneId) {
-                $allowedZones = array();
-                foreach ($zoneRestrictions as $zr) {
-                    $allowedZones[] = (int)$zr['id_value'];
+            if (!empty($zoneRestrictions)) {
+                if ($zoneId > 0) {
+                    // Solo filtrar si ya se conoce la zona del cliente
+                    $zoneOk = in_array($zoneId, $zoneRestrictions);
+                } else {
+                    // Sin dirección de entrega aún: no bloquear por zona desconocida
+                    $zoneOk = true;
                 }
-                $zoneOk = in_array($zoneId, $allowedZones);
-            } elseif (!empty($zoneRestrictions) && !$zoneId) {
-                $zoneOk = false;
             }
+
+            self::log('regla ' . $ruleId . ': groupOk=' . (int)$groupOk . ' zoneOk=' . (int)$zoneOk);
 
             if ($groupOk && $zoneOk) {
                 $filtered[] = $rule;

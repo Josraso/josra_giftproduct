@@ -128,10 +128,10 @@
             });
         });
 
-        // Ver detalle (abre modal igual que Editar)
+        // Ver detalle - modal solo lectura con los tramos
         $(document).on('click', '.josra-btn-view-levels', function (e) {
             e.preventDefault();
-            openRuleModal(parseInt($(this).data('id')));
+            openLevelsViewModal(parseInt($(this).data('id')));
         });
 
         // Toggle activo
@@ -151,6 +151,72 @@
         // Guardar desde modal
         $(document).on('click', '#josra-rule-save-btn', function () {
             saveRule();
+        });
+    }
+
+    // =========================================================================
+    // MODAL SOLO LECTURA: Ver tramos
+    // =========================================================================
+
+    function openLevelsViewModal(ruleId) {
+        $('#josra-rule-modal-title').text('Tramos de la regla');
+        $('#josra-rule-save-btn').hide();
+        $('#josra-rule-modal-body').html(
+            '<div class="text-center" style="padding:20px;">' +
+            '<i class="icon-refresh icon-spin"></i> Cargando...</div>'
+        );
+        $('#josra-rule-modal').modal('show');
+
+        adminAjax({ action: 'get_rule', id_josra_gift_rule: ruleId }, function (data) {
+            if (!data || !data.rule) {
+                $('#josra-rule-modal-body').html('<p class="text-danger">Error al cargar los datos.</p>');
+                return;
+            }
+            var rule   = data.rule;
+            var levels = data.levels || [];
+            var triggerType = rule.trigger_type;
+            var thLabel = triggerType === 'quantity' ? 'Cantidad mínima' : 'Importe mínimo (€)';
+
+            var html = [
+                '<h4 style="margin-top:0;">' + escHtml(rule.name) + '</h4>',
+                '<p>',
+                '<strong>Tipo:</strong> ' + escHtml(triggerType === 'amount' ? 'Por importe' : triggerType === 'quantity' ? 'Por cantidad' : 'Por producto'),
+                rule.date_start || rule.date_end
+                    ? ' &nbsp;|&nbsp; <strong>Fechas:</strong> ' + escHtml((rule.date_start || '-') + ' → ' + (rule.date_end || '-'))
+                    : '',
+                '</p>',
+                '<table class="table table-bordered table-striped" style="margin-top:12px;">',
+                '<thead><tr>',
+                '<th>' + thLabel + '</th>',
+                '<th>Producto regalo</th>',
+                '<th style="width:80px;text-align:center;">Uds.</th>',
+                '</tr></thead>',
+                '<tbody>',
+            ];
+
+            if (levels.length === 0) {
+                html.push('<tr><td colspan="3" class="text-center text-muted">Sin tramos configurados</td></tr>');
+            } else {
+                levels.forEach(function (level) {
+                    var triggerLabel = triggerType === 'quantity'
+                        ? parseInt(level.trigger_value, 10) + ' uds.'
+                        : parseFloat(level.trigger_value).toFixed(2) + ' €';
+                    html.push(
+                        '<tr>',
+                        '<td><strong>' + escHtml(triggerLabel) + '</strong></td>',
+                        '<td>' + escHtml(level.product_name || ('Producto ID ' + level.id_product)) + '</td>',
+                        '<td style="text-align:center;">' + escHtml(String(level.gift_qty || 1)) + '</td>',
+                        '</tr>'
+                    );
+                });
+            }
+
+            html.push('</tbody></table>');
+            $('#josra-rule-modal-body').html(html.join(''));
+        });
+
+        $('#josra-rule-modal').one('hidden.bs.modal', function () {
+            $('#josra-rule-save-btn').show();
         });
     }
 
