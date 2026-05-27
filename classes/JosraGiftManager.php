@@ -496,6 +496,11 @@ class JosraGiftManager
                 }
             }
         }
+        // Sin dirección: usar el país detectado por PrestaShop (GeoIP o Accept-Language)
+        if (!$zoneId && isset($this->context->country) && Validate::isLoadedObject($this->context->country)) {
+            $zoneId = (int)$this->context->country->id_zone;
+            self::log('zoneId por context->country: ' . $zoneId . ' iso=' . $this->context->country->iso_code);
+        }
 
         self::log('segmentacion: groupIds=[' . implode(',', $groupIds) . '] zoneId=' . $zoneId);
 
