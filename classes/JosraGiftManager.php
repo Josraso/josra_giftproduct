@@ -418,13 +418,17 @@ class JosraGiftManager
 
     private function removeGiftPrice($cart, $productId, $attrId)
     {
+        // Cualquier specific_price con id_cart = este carrito para este
+        // producto ha sido creado por este módulo (los precios específicos
+        // de administración nunca usan id_cart). Se eliminan todos sin
+        // filtrar por "price" para limpiar también filas heredadas de
+        // versiones anteriores (price = 0.000000).
         $rows = Db::getInstance()->executeS(
             'SELECT `id_specific_price`
              FROM `' . _DB_PREFIX_ . 'specific_price`
              WHERE `id_product` = ' . (int)$productId . '
                AND `id_product_attribute` = ' . (int)$attrId . '
-               AND `id_cart` = ' . (int)$cart->id . '
-               AND `price` = -1'
+               AND `id_cart` = ' . (int)$cart->id
         );
         if (!$rows) {
             return;

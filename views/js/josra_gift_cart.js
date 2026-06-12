@@ -188,7 +188,7 @@
                 setTimeout(function () {
                     josraGift.applyBadgeColors();
                     josraGift.positionBadges();
-                    josraGift.checkDeletedViaAjax();
+                    josraGift.refreshGiftStatus();
                 }, 400);
             });
 
@@ -202,13 +202,24 @@
             });
         },
 
-        checkDeletedViaAjax: function () {
-            if (!josraGift._pendingDeleteCheck) return;
+        // Tras cualquier cambio en el carrito, pide al servidor que
+        // reevalúe el regalo contra el estado ya confirmado en BD
+        // (los hooks síncronos pueden disparar con datos desfasados).
+        refreshGiftStatus: function () {
+            var wasPendingDelete = josraGift._pendingDeleteCheck;
             josraGift._pendingDeleteCheck = false;
 
             josraGift.ajax({ action: 'get_cart_status' }, function (data) {
-                if (data && data.deleted) josraGift.showDeletedWarning();
-                if (data && data.unlocked) josraGift.showUnlockedNotification(cfg.unlocked_msg || '¡Has desbloqueado un regalo!');
+                if (!data) return;
+                if (wasPendingDelete && data.deleted) {
+                    josraGift.showDeletedWarning();
+                }
+                if (data.unlocked) {
+                    josraGift.showUnlockedNotification(cfg.unlocked_msg || '¡Has desbloqueado un regalo!');
+                }
+                if (data.cart_changed) {
+                    window.location.reload();
+                }
             });
         },
 

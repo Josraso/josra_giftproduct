@@ -74,12 +74,25 @@ class Josra_GiftProductAjaxModuleFrontController extends ModuleFrontController
             return;
         }
 
-        $giftManager  = new JosraGiftManager($this->context, $module->psVersionBranch);
+        $giftManager = new JosraGiftManager($this->context, $module->psVersionBranch);
+
+        // Re-evaluar contra el estado real del carrito (ya confirmado en BD):
+        // los hooks síncronos de borrado/actualización pueden disparar antes
+        // de que el cambio quede reflejado, dejando el regalo desfasado.
+        $beforeGift = $giftManager->getCurrentGiftInCart($cart);
+        $giftManager->evaluateAndApply($cart);
+
         $currentGift  = $giftManager->getCurrentGiftInCart($cart);
         $nextRuleInfo = $giftManager->getNextRuleInfo($cart);
 
         $deletedFlag  = isset($this->context->cookie->josra_gift_deleted) ? (int)$this->context->cookie->josra_gift_deleted : 0;
         $unlockedFlag = isset($this->context->cookie->josra_gift_unlocked) ? (int)$this->context->cookie->josra_gift_unlocked : 0;
+
+        $cartChanged = $beforeGift && (
+            !$currentGift
+            || (int)$beforeGift['product_id'] !== (int)$currentGift['product_id']
+            || (int)$beforeGift['attr_id'] !== (int)$currentGift['attr_id']
+        );
 
         $response = array(
             'gift' => $currentGift ? array(
@@ -90,8 +103,9 @@ class Josra_GiftProductAjaxModuleFrontController extends ModuleFrontController
                 'amount_missing' => $nextRuleInfo['amount_missing'],
                 'trigger_type'   => $nextRuleInfo['trigger_type'],
             ) : null,
-            'unlocked' => $unlockedFlag,
-            'deleted'  => $deletedFlag,
+            'unlocked'     => $unlockedFlag,
+            'deleted'      => $deletedFlag,
+            'cart_changed' => $cartChanged,
         );
 
         $this->context->cookie->josra_gift_unlocked = 0;
