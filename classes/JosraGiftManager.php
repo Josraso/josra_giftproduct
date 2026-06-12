@@ -135,22 +135,11 @@ class JosraGiftManager
         if ($currentGift) {
             if ((int)$currentGift['product_id'] === (int)$giftProduct['id_product']
                 && (int)$currentGift['attr_id'] === (int)$giftProduct['id_product_attribute']) {
-                // Verificar que la cantidad no haya sido manipulada manualmente
-                $expectedQty = max(1, (int)$giftProduct['gift_qty']);
-                $actualQty   = $this->getRawGiftQtyInCart($cart, $giftProduct['id_product'], $giftProduct['id_product_attribute']);
-                if ($actualQty > $expectedQty) {
-                    self::log('qty regalo manipulada (' . $actualQty . ' > ' . $expectedQty . '), restaurando');
-                    $cart->updateQty(
-                        $actualQty - $expectedQty,
-                        (int)$giftProduct['id_product'],
-                        (int)$giftProduct['id_product_attribute'],
-                        false,
-                        'down',
-                        0,
-                        null
-                    );
-                }
-                self::log('regalo correcto ya en carrito, nada que hacer');
+                // Recalcular el descuento: las primeras gift_qty unidades son
+                // gratis, cualquier unidad adicional que añada el cliente se
+                // cobra a precio normal dentro de la misma línea del carrito.
+                $this->adjustGiftDiscount($cart, $giftProduct);
+                self::log('regalo correcto ya en carrito, descuento recalculado');
                 return;
             }
             self::log('regalo diferente, quitando el actual');
@@ -202,7 +191,7 @@ class JosraGiftManager
 
     private function getRawGiftQtyInCart($cart, $productId, $attrId)
     {
-        foreach ($cart->getProducts() as $p) {
+        foreach ($cart->getProducts(true) as $p) {
             if ((int)$p['id_product'] === (int)$productId
                 && (int)$p['id_product_attribute'] === (int)$attrId) {
                 return (int)$p['cart_quantity'];
@@ -333,8 +322,8 @@ class JosraGiftManager
             return;
         }
 
-        $this->setGiftPrice($cart, $productId, $attrId);
         $this->markCartItemAsGift($cart, $productId, $attrId, (int)$rule['id_josra_gift_rule'], (int)$level['id_josra_gift_rule_level'], $giftQty);
+        $this->adjustGiftDiscount($cart, $giftProduct);
         self::log('regalo añadido y marcado OK');
 
         $this->context->cookie->josra_gift_unlocked = 1;
@@ -365,12 +354,47 @@ class JosraGiftManager
     }
 
     // =========================================================================
-    // PRECIO A CERO
+    // DESCUENTO DEL REGALO (primeras gift_qty unidades gratis)
     // =========================================================================
 
-    private function setGiftPrice($cart, $productId, $attrId)
+    /**
+     * Recalcula el descuento aplicado a la línea del producto regalo para que
+     * solo las primeras `gift_qty` unidades sean gratis. Si el cliente añade
+     * unidades adicionales en la misma línea, esas unidades se cobran a
+     * precio normal repartiendo el descuento total (constante) entre todas
+     * las unidades de la línea.
+     */
+    private function adjustGiftDiscount($cart, $giftProduct)
+    {
+        $productId = (int)$giftProduct['id_product'];
+        $attrId    = (int)$giftProduct['id_product_attribute'];
+        $giftQty   = max(1, (int)$giftProduct['gift_qty']);
+
+        $actualQty = $this->getRawGiftQtyInCart($cart, $productId, $attrId);
+        if ($actualQty <= 0) {
+            return;
+        }
+
+        $freeUnits = min($giftQty, $actualQty);
+        $basePrice = Product::getPriceStatic($productId, true, $attrId, 6, null, false, false);
+        $reductionPerUnit = round(($basePrice * $freeUnits) / $actualQty, 6);
+
+        self::log('adjustGiftDiscount: actualQty=' . $actualQty . ' giftQty=' . $giftQty . ' basePrice=' . $basePrice . ' reductionPerUnit=' . $reductionPerUnit);
+
+        if ($actualQty > $giftQty) {
+            self::log('cliente ha añadido unidades extra (' . $actualQty . ' > ' . $giftQty . '), se cobran a precio normal');
+        }
+
+        $this->setGiftPrice($cart, $productId, $attrId, $reductionPerUnit);
+    }
+
+    private function setGiftPrice($cart, $productId, $attrId, $reductionPerUnit)
     {
         $this->removeGiftPrice($cart, $productId, $attrId);
+
+        if ($reductionPerUnit <= 0) {
+            return;
+        }
 
         $sp = new SpecificPrice();
         $sp->id_product           = $productId;
@@ -382,9 +406,9 @@ class JosraGiftManager
         $sp->id_country           = 0;
         $sp->id_group             = 0;
         $sp->id_customer          = (int)$cart->id_customer;
-        $sp->price                = '0.000000';
+        $sp->price                = -1;
         $sp->from_quantity        = 1;
-        $sp->reduction            = '0.000000';
+        $sp->reduction            = $reductionPerUnit;
         $sp->reduction_type       = 'amount';
         $sp->reduction_tax        = 1;
         $sp->from                 = '0000-00-00 00:00:00';
@@ -400,7 +424,7 @@ class JosraGiftManager
              WHERE `id_product` = ' . (int)$productId . '
                AND `id_product_attribute` = ' . (int)$attrId . '
                AND `id_cart` = ' . (int)$cart->id . '
-               AND `price` = \'0.000000\''
+               AND `price` = -1'
         );
         if (!$rows) {
             return;
