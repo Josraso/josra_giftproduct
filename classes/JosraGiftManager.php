@@ -493,6 +493,11 @@ class JosraGiftManager
         if ($idAttr && !$this->combinationBelongs($idProduct, $idAttr)) {
             return array('code' => 'combination');
         }
+        // Producto con combinaciones sin combinación: el precio a cero valdría
+        // para todas sus combinaciones (también las que compra el cliente).
+        if (!$idAttr && $this->hasCombinations($idProduct)) {
+            return array('code' => 'combination');
+        }
         if (!Configuration::get('PS_STOCK_MANAGEMENT')) {
             return null;
         }
@@ -520,10 +525,7 @@ class JosraGiftManager
     public function normalizeLevel(array $level)
     {
         if ((int)$level['id_product'] && !(int)$level['id_product_attribute']) {
-            $hasCombinations = (bool)Db::getInstance()->getValue(
-                'SELECT 1 FROM `' . _DB_PREFIX_ . 'product_attribute` WHERE `id_product` = ' . (int)$level['id_product']
-            );
-            if ($hasCombinations) {
+            if ($this->hasCombinations((int)$level['id_product'])) {
                 $level['id_product_attribute'] = (int)Product::getDefaultAttribute((int)$level['id_product']);
                 $level['combination_name'] = $level['id_product_attribute']
                     ? JosraGiftRule::getCombinationName($level['id_product_attribute'], (int)$this->context->language->id)
@@ -531,6 +533,13 @@ class JosraGiftManager
             }
         }
         return $level;
+    }
+
+    protected function hasCombinations($idProduct)
+    {
+        return (bool)Db::getInstance()->getValue(
+            'SELECT 1 FROM `' . _DB_PREFIX_ . 'product_attribute` WHERE `id_product` = ' . (int)$idProduct
+        );
     }
 
     protected function combinationBelongs($idProduct, $idAttr)
@@ -606,6 +615,11 @@ class JosraGiftManager
         $products = $cart->getProducts(true);
         $lineQty = $this->lineQty($products, $state['id_product'], $state['id_product_attribute']);
         $free = min((int)$state['gift_qty'], $lineQty);
+        // Nunca un precio a cero sin combinación en un producto con combinaciones:
+        // se aplicaría a todas las combinaciones del carrito.
+        if (!(int)$state['id_product_attribute'] && $this->hasCombinations((int)$state['id_product'])) {
+            $free = 0;
+        }
         if ($free <= 0) {
             JosraGiftCart::deleteSpecificPrice($state['id_specific_price'], $cart->id);
             $state['id_specific_price'] = 0;

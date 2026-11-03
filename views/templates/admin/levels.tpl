@@ -3,11 +3,11 @@
   <table class="table josra-levels-table">
     <thead>
       <tr>
-        <th class="josra-col-threshold fixed-width-md"><span class="josra-threshold-label"></span></th>
+        <th class="josra-col-threshold"><span class="josra-threshold-label"></span></th>
         <th>{l s='Producto de regalo' mod='josra_giftproduct'}</th>
         <th>{l s='Combinación' mod='josra_giftproduct'}</th>
-        <th class="fixed-width-xs">{l s='Uds.' mod='josra_giftproduct'}</th>
-        <th class="fixed-width-xs"></th>
+        <th class="josra-col-qty">{l s='Uds.' mod='josra_giftproduct'}</th>
+        <th class="josra-col-remove"></th>
       </tr>
     </thead>
     <tbody>

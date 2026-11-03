@@ -6,6 +6,10 @@ Reescritura de la base. Al actualizar desde 1.x se migran reglas, tramos y los
 regalos que ya haya en carritos abiertos (no se pasan a cobrar).
 
 ### Corregido
+- Regalo de un producto con combinaciones guardado sin combinación: el precio a cero se aplicaba a todas
+  las combinaciones, también a las que compraba el cliente. Ahora se usa la combinación por defecto y nunca
+  se crea un precio a cero sin combinación en esos productos.
+- Casilla de unidades de los tramos demasiado estrecha (no se veía el número).
 - En 1.7, 8 y 9 se usaban hooks del carrito que no existen (`actionCartUpdateQuantity`,
   `actionAfterDeleteProductInCart`): ahora `actionCartSave` y `actionObjectProductInCartDeleteAfter`.
 - El regalo se guardaba en la cookie del cliente: con TPV que validan por notificación

@@ -6,7 +6,11 @@
 .josra-picker .josra-picker-results a { white-space: normal; }
 .josra-picker.has-error .josra-picker-input { border-color: #e84e6a; }
 .josra-levels-table td { vertical-align: top !important; }
-.josra-levels-table .josra-qty { width: 70px; }
+.josra-levels-table .josra-col-threshold { width: 150px; }
+.josra-levels-table .josra-col-qty { width: 110px; }
+.josra-levels-table .josra-col-remove { width: 60px; }
+.josra-levels-table input.josra-qty,
+.josra-levels-table input.josra-threshold { width: 100%; min-width: 90px; padding-left: 8px; padding-right: 8px; text-align: center; }
 .josra-dates input[type="date"] { width: auto; display: inline-block; margin: 0 6px; }
 .josra-stats-filter { margin-bottom: 15px; }
 .josra-stats-filter input[type="date"] { width: auto; display: inline-block; margin: 0 6px; }
