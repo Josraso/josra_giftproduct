@@ -95,6 +95,15 @@ class JosraGiftAdmin
             $html .= $this->module->displayError(implode('<br>', $errors));
         }
 
+        // Va antes que "guardar": HelperForm envía siempre un campo oculto con su submit_action.
+        if (Tools::isSubmit('duplicateJosraGiftRule')) {
+            $newId = JosraGiftRule::duplicate((int)Tools::getValue($this->identifier));
+            if ($newId) {
+                $this->flash($this->l('Regla duplicada. Está desactivada: revísala y actívala.'));
+                $this->redirect('&update' . $this->table . '&' . $this->identifier . '=' . (int)$newId);
+            }
+        }
+
         if (Tools::isSubmit('submitJosraGiftRule') || Tools::isSubmit('submitJosraGiftRuleStay')) {
             $id = 0;
             $errors = $this->saveRule($id);
@@ -106,14 +115,6 @@ class JosraGiftAdmin
                 $this->redirect();
             }
             return $html . $this->module->displayError(implode('<br>', $errors)) . $this->renderRuleForm(true);
-        }
-
-        if (Tools::isSubmit('duplicateJosraGiftRule')) {
-            $newId = JosraGiftRule::duplicate((int)Tools::getValue($this->identifier));
-            if ($newId) {
-                $this->flash($this->l('Regla duplicada. Está desactivada: revísala y actívala.'));
-                $this->redirect('&update' . $this->table . '&' . $this->identifier . '=' . (int)$newId);
-            }
         }
 
         if (Tools::getIsset('status' . $this->table)) {
@@ -139,7 +140,7 @@ class JosraGiftAdmin
             return $html . $this->renderRuleForm(false);
         }
 
-        return $html . $this->renderRuleList() . $this->renderStats() . $this->renderConfigForm();
+        return $html . $this->renderRuleList() . $this->renderConfigForm() . $this->renderStats();
     }
 
     // =========================================================================
@@ -251,6 +252,8 @@ class JosraGiftAdmin
             $row['levels_label'] = $parts ? implode(' | ', $parts) : $this->l('Sin tramos');
             $row['dates_label'] = $this->datesLabel($row['date_start'], $row['date_end']);
             $row['uses_label'] = (int)$row['uses_count'] . ' / ' . ((int)$row['max_uses'] ? (int)$row['max_uses'] : '∞');
+            $warnings = $this->ruleWarnings($row, $levels);
+            $row['warnings_label'] = $warnings ? implode(' · ', $warnings) : $this->l('Correcta');
         }
         unset($row);
 
@@ -263,6 +266,7 @@ class JosraGiftAdmin
             'uses_label' => array('title' => $this->l('Entregados'), 'align' => 'center', 'class' => 'fixed-width-sm'),
             'orders_count' => array('title' => $this->l('Pedidos'), 'align' => 'center', 'class' => 'fixed-width-xs'),
             'priority' => array('title' => $this->l('Prioridad'), 'align' => 'center', 'class' => 'fixed-width-xs'),
+            'warnings_label' => array('title' => $this->l('Estado')),
             'active' => array('title' => $this->l('Activa'), 'active' => 'status', 'type' => 'bool', 'align' => 'center', 'class' => 'fixed-width-sm'),
         );
         foreach ($fields as &$f) {
@@ -298,6 +302,65 @@ class JosraGiftAdmin
                 . '</div>';
         }
         return $html;
+    }
+
+    /**
+     * Motivos por los que una regla no daría regalo (para avisar en la lista y
+     * en el formulario). Se comprueba con el carrito vacío.
+     */
+    public function ruleWarnings(array $rule, array $levels)
+    {
+        $out = array();
+        $today = date('Y-m-d');
+        $start = isset($rule['date_start']) ? (string)$rule['date_start'] : '';
+        $end = isset($rule['date_end']) ? (string)$rule['date_end'] : '';
+        if ($end && $end !== '0000-00-00' && $end < $today) {
+            $out[] = $this->l('Caducada');
+        } elseif ($start && $start !== '0000-00-00' && $start > $today) {
+            $out[] = sprintf($this->l('Empieza el %s'), $this->module->formatDate($start));
+        }
+        if ((int)$rule['max_uses'] > 0 && (int)$rule['uses_count'] >= (int)$rule['max_uses']) {
+            $out[] = $this->l('Sin unidades de regalo disponibles');
+        }
+        if ($rule['trigger_type'] === JosraGiftRule::TRIGGER_PRODUCT && !(int)$rule['id_trigger_product']) {
+            $out[] = $this->l('Falta el producto que hay que comprar');
+        }
+        if (!$levels) {
+            $out[] = $this->l('Sin tramos');
+        }
+        $manager = $this->module->getManager();
+        foreach ($levels as $i => $lv) {
+            if ($rule['trigger_type'] === JosraGiftRule::TRIGGER_PRODUCT && $i > 0) {
+                break;
+            }
+            $n = $i + 1;
+            $normalized = $manager->normalizeLevel($lv);
+            if ((int)$lv['id_product'] && !(int)$lv['id_product_attribute'] && (int)$normalized['id_product_attribute']) {
+                $out[] = sprintf($this->l('Tramo %d: sin combinación elegida, se dará la predeterminada'), $n);
+            }
+            $problem = $manager->levelProblem($normalized, $rule);
+            if (!$problem) {
+                continue;
+            }
+            switch ($problem['code']) {
+                case 'no_product':
+                    $out[] = sprintf($this->l('Tramo %d: el producto no existe'), $n);
+                    break;
+                case 'inactive':
+                    $out[] = sprintf($this->l('Tramo %d: producto desactivado'), $n);
+                    break;
+                case 'combination':
+                    $out[] = sprintf($this->l('Tramo %d: la combinación ya no existe'), $n);
+                    break;
+                case 'stock':
+                    $out[] = sprintf($this->l('Tramo %d: stock %d de %d uds. necesarias'), $n, $problem['stock'], $problem['needed']);
+                    break;
+                case 'uses':
+                    $out[] = sprintf($this->l('Tramo %d: quedan %d uds. de regalo y hacen falta %d'), $n, $problem['left'], $problem['needed']);
+                    break;
+            }
+        }
+        return array_values(array_unique($out));
     }
 
     protected function datesLabel($start, $end)
@@ -564,7 +627,19 @@ class JosraGiftAdmin
         $helper->currentIndex = $this->baseUrl() . ($isNew ? '&add' . $this->table : '&update' . $this->table . '&' . $this->identifier . '=' . (int)$rule->id);
         $helper->fields_value = $values;
 
-        return $this->adminAssets() . $helper->generateForm(array($form));
+        $warningsHtml = '';
+        if (!$isNew && !$fromPost) {
+            $warnings = $this->ruleWarnings(array(
+                'date_start' => $rule->date_start, 'date_end' => $rule->date_end,
+                'max_uses' => $rule->max_uses, 'uses_count' => $rule->uses_count,
+                'trigger_type' => $rule->trigger_type, 'id_trigger_product' => $rule->id_trigger_product,
+            ), $levels);
+            if ($warnings) {
+                $warningsHtml = $this->module->displayWarning(array_map('Tools::safeOutput', $warnings));
+            }
+        }
+
+        return $warningsHtml . $this->adminAssets() . $helper->generateForm(array($form));
     }
 
     protected function formHelper($submitAction)
@@ -917,6 +992,8 @@ class JosraGiftAdmin
         );
 
         $helper = $this->formHelper('submitJosraGiftConfig');
+        $helper->table = 'josra_gift_config';
+        $helper->identifier = 'id_josra_gift_config';
         $values = array();
         foreach (self::configKeys() as $key) {
             $values[$key] = Configuration::get($key);

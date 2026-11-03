@@ -215,7 +215,7 @@ class JosraGiftManager
     protected function computeTarget($cart, array $products, array $state, $freeInCart)
     {
         foreach ($this->getApplicableRules($cart) as $rule) {
-            $levels = $rule['levels'];
+            $levels = array_map(array($this, 'normalizeLevel'), $rule['levels']);
             $reached = -1;
 
             if ($rule['trigger_type'] === JosraGiftRule::TRIGGER_PRODUCT) {
@@ -237,8 +237,12 @@ class JosraGiftManager
             }
 
             if ($reached < 0) {
+                self::log('regla ' . $rule['id_josra_gift_rule'] . ' (' . $rule['name'] . '): no se alcanza ningún tramo'
+                    . (isset($value) ? ' (valor ' . $value . ')' : ''));
+                unset($value);
                 continue;
             }
+            unset($value);
             for ($i = $reached; $i >= 0; --$i) {
                 if ($this->isGiftAvailable($levels[$i], $rule, $products, $state, $freeInCart)) {
                     return array(
@@ -327,10 +331,12 @@ class JosraGiftManager
         foreach ($rules as $rule) {
             $r = $rule['restrictions'];
             if (!empty($r['group']) && !array_intersect($groups, $r['group'])) {
+                self::log('regla ' . $rule['id_josra_gift_rule'] . ': grupo del cliente [' . implode(',', $groups) . '] no permitido');
                 continue;
             }
             // Zona desconocida (visitante sin dirección ni país): no se bloquea.
             if (!empty($r['zone']) && $zone && !in_array($zone, $r['zone'])) {
+                self::log('regla ' . $rule['id_josra_gift_rule'] . ': zona ' . $zone . ' no permitida');
                 continue;
             }
             $out[] = $rule;
@@ -449,39 +455,82 @@ class JosraGiftManager
 
     protected function isGiftAvailable(array $level, array $rule, array $products, array $state, $freeInCart)
     {
+        $problem = $this->levelProblem($level, $rule, $products, $state, $freeInCart);
+        if ($problem) {
+            self::log('regla ' . $rule['id_josra_gift_rule'] . ' tramo ' . $level['id_josra_gift_rule_level']
+                . ': no se puede dar (' . $problem['code'] . ' ' . json_encode($problem) . ')');
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Por qué no se puede dar el regalo de un tramo (null si se puede).
+     * También lo usa el back-office para avisar en la lista de reglas.
+     * Códigos: no_product, uses, inactive, combination, stock.
+     */
+    public function levelProblem(array $level, array $rule, array $products = array(), array $state = array(), $freeInCart = 0)
+    {
         $idProduct = (int)$level['id_product'];
         $idAttr = (int)$level['id_product_attribute'];
-        $qty = (int)$level['gift_qty'];
+        $qty = max(1, (int)$level['gift_qty']);
         if (!$idProduct) {
-            return false;
+            return array('code' => 'no_product');
         }
 
         // Unidades de regalo que quedan en la regla.
         if ((int)$rule['max_uses'] > 0 && ((int)$rule['max_uses'] - (int)$rule['uses_count']) < $qty) {
-            return false;
+            return array('code' => 'uses', 'left' => max(0, (int)$rule['max_uses'] - (int)$rule['uses_count']), 'needed' => $qty);
         }
 
         $product = new Product($idProduct, false, (int)$this->context->language->id);
-        if (!Validate::isLoadedObject($product) || !$product->active) {
-            return false;
+        if (!Validate::isLoadedObject($product)) {
+            return array('code' => 'no_product');
+        }
+        if (!$product->active) {
+            return array('code' => 'inactive');
         }
         if ($idAttr && !$this->combinationBelongs($idProduct, $idAttr)) {
-            return false;
+            return array('code' => 'combination');
         }
         if (!Configuration::get('PS_STOCK_MANAGEMENT')) {
-            return true;
+            return null;
         }
         if (Product::isAvailableWhenOutOfStock(StockAvailable::outOfStock($idProduct))) {
-            return true;
+            return null;
         }
 
         // El cliente puede tener ya unidades pagadas de ese mismo producto.
         $paidSameLine = $this->lineQty($products, $idProduct, $idAttr);
-        if ((int)$state['id_product'] === $idProduct && (int)$state['id_product_attribute'] === $idAttr) {
+        if (!empty($state) && (int)$state['id_product'] === $idProduct && (int)$state['id_product_attribute'] === $idAttr) {
             $paidSameLine -= (int)$freeInCart;
         }
+        $needed = max(0, $paidSameLine) + $qty;
         $stock = (int)StockAvailable::getQuantityAvailableByProduct($idProduct, $idAttr);
-        return $stock >= max(0, $paidSameLine) + $qty;
+        if ($stock < $needed) {
+            return array('code' => 'stock', 'stock' => $stock, 'needed' => $needed);
+        }
+        return null;
+    }
+
+    /**
+     * Tramo de un producto con combinaciones guardado sin combinación (reglas
+     * antiguas): se usa la combinación por defecto del producto.
+     */
+    public function normalizeLevel(array $level)
+    {
+        if ((int)$level['id_product'] && !(int)$level['id_product_attribute']) {
+            $hasCombinations = (bool)Db::getInstance()->getValue(
+                'SELECT 1 FROM `' . _DB_PREFIX_ . 'product_attribute` WHERE `id_product` = ' . (int)$level['id_product']
+            );
+            if ($hasCombinations) {
+                $level['id_product_attribute'] = (int)Product::getDefaultAttribute((int)$level['id_product']);
+                $level['combination_name'] = $level['id_product_attribute']
+                    ? JosraGiftRule::getCombinationName($level['id_product_attribute'], (int)$this->context->language->id)
+                    : '';
+            }
+        }
+        return $level;
     }
 
     protected function combinationBelongs($idProduct, $idAttr)

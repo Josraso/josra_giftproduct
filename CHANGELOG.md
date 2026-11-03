@@ -27,6 +27,10 @@ regalos que ya haya en carritos abiertos (no se pasan a cobrar).
 - Ajustes globales de IVA/envío que no se usaban: eliminados (van en cada regla).
 
 ### Nuevo
+- Columna **Estado** en la lista de reglas y avisos al editar: dice por qué una regla no daría regalo
+  (stock insuficiente para las unidades a regalar, producto desactivado, caducada, sin unidades, combinación...).
+- Con el modo depuración, el log explica regla a regla por qué no se aplica (grupo, zona, umbral, stock).
+- Reglas antiguas con producto con combinaciones guardado sin combinación: se usa la predeterminada.
 - Admin con componentes nativos: HelperList (reglas), HelperForm (regla y ajustes), switches, colores y textos multiidioma nativos.
 - Grupos y zonas con casillas; duplicar regla; "guardar y seguir editando".
 - Columna "Regalo" en el listado de pedidos y panel en la ficha del pedido.
