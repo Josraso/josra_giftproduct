@@ -921,6 +921,9 @@ class JosraGiftAdmin
         foreach (self::configKeys() as $key) {
             $values[$key] = Configuration::get($key);
         }
+        // Los campos multiidioma van como array por idioma.
+        $values['JOSRA_GIFT_BADGE_TEXT'] = array();
+        $values['JOSRA_GIFT_MOTIVATIONAL_TEXT'] = array();
         foreach (Language::getLanguages(false) as $lang) {
             $idL = (int)$lang['id_lang'];
             $values['JOSRA_GIFT_BADGE_TEXT'][$idL] = Configuration::get('JOSRA_GIFT_BADGE_TEXT', $idL);
