@@ -54,26 +54,26 @@ class JosraGiftRule extends ObjectModel
     /** @var array|null caché por petición */
     protected static $activeCache = null;
 
-    public static function clearCache()
+    public static function resetActiveCache()
     {
         self::$activeCache = null;
     }
 
     public function add($autoDate = true, $nullValues = true)
     {
-        self::clearCache();
+        self::resetActiveCache();
         return parent::add($autoDate, $nullValues);
     }
 
     public function update($nullValues = true)
     {
-        self::clearCache();
+        self::resetActiveCache();
         return parent::update($nullValues);
     }
 
     public function delete()
     {
-        self::clearCache();
+        self::resetActiveCache();
         $id = (int)$this->id;
         $ok = parent::delete();
         if ($ok) {
@@ -172,7 +172,7 @@ class JosraGiftRule extends ObjectModel
                 'sort_order' => $pos++,
             ));
         }
-        self::clearCache();
+        self::resetActiveCache();
     }
 
     public static function saveRestrictions($idRule, array $groups, array $zones)
@@ -189,7 +189,7 @@ class JosraGiftRule extends ObjectModel
                 }
             }
         }
-        self::clearCache();
+        self::resetActiveCache();
     }
 
     /**
@@ -208,7 +208,7 @@ class JosraGiftRule extends ObjectModel
             'UPDATE `' . _DB_PREFIX_ . 'josra_gift_rule` SET `uses_count` = ' . $expr . '
              WHERE `id_josra_gift_rule` = ' . (int)$idRule
         );
-        self::clearCache();
+        self::resetActiveCache();
     }
 
     public static function duplicate($idRule)
