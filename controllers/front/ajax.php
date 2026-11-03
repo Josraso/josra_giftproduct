@@ -1,124 +1,44 @@
 <?php
 /**
- * Controlador Ajax frontend
- * Compatible PHP 5.6+
+ * AJAX del carrito: estado del regalo y botón "Recuperar regalo".
  */
 
 if (!defined('_PS_VERSION_')) {
     exit;
 }
 
-require_once dirname(__FILE__) . '/../../classes/JosraGiftManager.php';
-require_once dirname(__FILE__) . '/../../classes/JosraGiftRule.php';
-
-class Josra_GiftProductAjaxModuleFrontController extends ModuleFrontController
+class Josra_giftproductAjaxModuleFrontController extends ModuleFrontController
 {
-    public function initContent()
-    {
-        parent::initContent();
-    }
+    public $ajax = true;
+    public $display_header = false;
+    public $display_footer = false;
+    public $content_only = true;
+    public $ssl = true;
 
     public function postProcess()
     {
-        $action = Tools::getValue('action');
-        header('Content-Type: application/json; charset=utf-8');
-
-        switch ($action) {
-            case 'restore_gift':
-                $this->actionRestoreGift();
-                break;
-            case 'get_cart_status':
-                $this->actionGetCartStatus();
-                break;
-            default:
-                $this->jsonResponse(array('error' => 'Unknown action'), 400);
-        }
-    }
-
-    private function actionRestoreGift()
-    {
         $cart = $this->context->cart;
-        if (!Validate::isLoadedObject($cart)) {
-            $this->jsonResponse(array('error' => 'No cart'), 400);
-            return;
+        $hasCart = is_object($cart) && Validate::isLoadedObject($cart);
+
+        if ($hasCart && Tools::getValue('josra_action') === 'restore') {
+            $this->module->getManager()->restore($cart);
         }
 
-        $module = Module::getInstanceByName('josra_giftproduct');
-        if (!$module) {
-            $this->jsonResponse(array('error' => 'Module not found'), 500);
-            return;
-        }
-
-        $giftManager = new JosraGiftManager($this->context, $module->psVersionBranch);
-        $giftManager->evaluateAndApply($cart);
-        $gift = $giftManager->getCurrentGiftInCart($cart);
-
-        $this->jsonResponse(array(
-            'success'      => true,
-            'gift_added'   => !empty($gift),
-            'redirect_url' => $this->context->link->getPageLink('cart'),
+        $notice = $hasCart ? JosraGiftCart::popNotice($cart->id) : null;
+        $this->json(array(
+            'gift' => $hasCart ? $this->module->getGiftLine($cart) : null,
+            'notice' => $notice ? $this->module->noticeText($notice) : '',
+            'block' => $this->module->renderCartBlock($hasCart ? $cart : null),
         ));
     }
 
-    private function actionGetCartStatus()
+    protected function json($data)
     {
-        $cart = $this->context->cart;
-        if (!Validate::isLoadedObject($cart)) {
-            $this->jsonResponse(array('gift' => null));
-            return;
+        while (ob_get_level()) {
+            ob_end_clean();
         }
-
-        $module = Module::getInstanceByName('josra_giftproduct');
-        if (!$module) {
-            $this->jsonResponse(array('gift' => null));
-            return;
-        }
-
-        $giftManager = new JosraGiftManager($this->context, $module->psVersionBranch);
-
-        // Re-evaluar contra el estado real del carrito (ya confirmado en BD):
-        // los hooks síncronos de borrado/actualización pueden disparar antes
-        // de que el cambio quede reflejado, dejando el regalo desfasado.
-        $beforeGift = $giftManager->getCurrentGiftInCart($cart);
-        $giftManager->evaluateAndApply($cart);
-
-        $currentGift  = $giftManager->getCurrentGiftInCart($cart);
-        $nextRuleInfo = $giftManager->getNextRuleInfo($cart);
-
-        $deletedFlag  = isset($this->context->cookie->josra_gift_deleted) ? (int)$this->context->cookie->josra_gift_deleted : 0;
-        $unlockedFlag = isset($this->context->cookie->josra_gift_unlocked) ? (int)$this->context->cookie->josra_gift_unlocked : 0;
-
-        $cartChanged = $beforeGift && (
-            !$currentGift
-            || (int)$beforeGift['product_id'] !== (int)$currentGift['product_id']
-            || (int)$beforeGift['attr_id'] !== (int)$currentGift['attr_id']
-        );
-
-        $response = array(
-            'gift' => $currentGift ? array(
-                'product_id' => (int)$currentGift['product_id'],
-                'attr_id'    => (int)$currentGift['attr_id'],
-            ) : null,
-            'next_threshold' => $nextRuleInfo ? array(
-                'amount_missing' => $nextRuleInfo['amount_missing'],
-                'trigger_type'   => $nextRuleInfo['trigger_type'],
-            ) : null,
-            'unlocked'     => $unlockedFlag,
-            'deleted'      => $deletedFlag,
-            'cart_changed' => $cartChanged,
-        );
-
-        $this->context->cookie->josra_gift_unlocked = 0;
-        $this->context->cookie->josra_gift_deleted  = 0;
-        $this->context->cookie->write();
-
-        $this->jsonResponse($response);
-    }
-
-    private function jsonResponse($data, $statusCode = 200)
-    {
-        http_response_code($statusCode);
-        echo json_encode($data);
-        exit;
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+        die(json_encode($data));
     }
 }

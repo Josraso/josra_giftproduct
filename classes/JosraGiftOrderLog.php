@@ -1,7 +1,6 @@
 <?php
 /**
- * JosraGiftOrderLog - Registro de regalos en pedidos
- * Compatible PHP 5.6+
+ * Regalos entregados en pedidos (estadísticas y back-office).
  */
 
 if (!defined('_PS_VERSION_')) {
@@ -14,114 +13,141 @@ class JosraGiftOrderLog extends ObjectModel
     public $id_order;
     public $id_cart;
     public $id_josra_gift_rule;
-    public $id_josra_gift_rule_level;
+    public $id_josra_gift_rule_level = 0;
     public $id_product;
-    public $id_product_attribute;
-    public $product_name;
-    public $original_price;
-    public $rule_name;
+    public $id_product_attribute = 0;
+    public $gift_qty = 1;
+    public $product_name = '';
+    public $original_price = 0;
+    public $rule_name = '';
+    public $status = 'valid';
     public $date_add;
 
     public static $definition = array(
-        'table'   => 'josra_gift_order_log',
+        'table' => 'josra_gift_order_log',
         'primary' => 'id_josra_gift_order_log',
-        'fields'  => array(
-            'id_order'                  => array('type' => self::TYPE_INT,    'validate' => 'isUnsignedInt', 'required' => true),
-            'id_cart'                   => array('type' => self::TYPE_INT,    'validate' => 'isUnsignedInt', 'required' => true),
-            'id_josra_gift_rule'        => array('type' => self::TYPE_INT,    'validate' => 'isUnsignedInt', 'required' => true),
-            'id_josra_gift_rule_level'  => array('type' => self::TYPE_INT,    'validate' => 'isUnsignedInt', 'required' => true),
-            'id_product'                => array('type' => self::TYPE_INT,    'validate' => 'isUnsignedInt', 'required' => true),
-            'id_product_attribute'      => array('type' => self::TYPE_INT,    'validate' => 'isUnsignedInt'),
-            'product_name'              => array('type' => self::TYPE_STRING, 'size' => 255),
-            'original_price'            => array('type' => self::TYPE_FLOAT,  'validate' => 'isPrice'),
-            'rule_name'                 => array('type' => self::TYPE_STRING, 'size' => 128),
-            'date_add'                  => array('type' => self::TYPE_DATE,   'validate' => 'isDate'),
+        'fields' => array(
+            'id_order' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedId', 'required' => true),
+            'id_cart' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedId', 'required' => true),
+            'id_josra_gift_rule' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedInt', 'required' => true),
+            'id_josra_gift_rule_level' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'),
+            'id_product' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedId', 'required' => true),
+            'id_product_attribute' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'),
+            'gift_qty' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'),
+            'product_name' => array('type' => self::TYPE_STRING, 'size' => 255),
+            'original_price' => array('type' => self::TYPE_FLOAT, 'validate' => 'isPrice'),
+            'rule_name' => array('type' => self::TYPE_STRING, 'size' => 128),
+            'status' => array('type' => self::TYPE_STRING, 'size' => 16),
+            'date_add' => array('type' => self::TYPE_DATE, 'validate' => 'isDate'),
         ),
     );
 
-    public static function getByOrderId($orderId)
+    public static function getByOrderId($idOrder)
     {
-        $result = Db::getInstance()->getRow(
-            'SELECT l.*, p.`reference` AS product_reference
-             FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l
-             LEFT JOIN `' . _DB_PREFIX_ . 'product` p ON p.`id_product` = l.`id_product`
-             WHERE l.`id_order` = ' . (int)$orderId
+        $row = Db::getInstance()->getRow(
+            'SELECT * FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` WHERE `id_order` = ' . (int)$idOrder
         );
-        return $result ? $result : null;
+        return $row ? $row : null;
     }
 
-    public static function getGlobalStats($dateFrom = null, $dateTo = null)
+    public static function setStatus($idLog, $status)
     {
-        $dateFilter = '';
-        if ($dateFrom) {
-            $dateFilter .= ' AND l.`date_add` >= \'' . pSQL($dateFrom) . ' 00:00:00\'';
-        }
-        if ($dateTo) {
-            $dateFilter .= ' AND l.`date_add` <= \'' . pSQL($dateTo) . ' 23:59:59\'';
-        }
-
-        $totals = Db::getInstance()->getRow(
-            'SELECT COUNT(DISTINCT l.`id_order`) AS total_orders_with_gift,
-                    COALESCE(SUM(l.`original_price`), 0) AS total_gifted_value
-             FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l
-             WHERE l.`id_order` > 0' . $dateFilter
+        return Db::getInstance()->update(
+            'josra_gift_order_log',
+            array('status' => pSQL($status)),
+            'id_josra_gift_order_log = ' . (int)$idLog
         );
+    }
 
-        $topProduct = Db::getInstance()->getRow(
-            'SELECT l.`product_name`, COUNT(*) AS cnt
-             FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l
-             WHERE l.`id_order` > 0' . $dateFilter . '
+    protected static function dateFilter($from, $to, $alias = 'l')
+    {
+        $sql = '';
+        if ($from && Validate::isDate($from)) {
+            $sql .= ' AND ' . $alias . '.`date_add` >= \'' . pSQL($from) . ' 00:00:00\'';
+        }
+        if ($to && Validate::isDate($to)) {
+            $sql .= ' AND ' . $alias . '.`date_add` <= \'' . pSQL($to) . ' 23:59:59\'';
+        }
+        return $sql;
+    }
+
+    /**
+     * Totales del periodo. El valor regalado es sin IVA y en la moneda por defecto.
+     */
+    public static function getStats($from = null, $to = null)
+    {
+        $where = 'WHERE l.`status` = \'valid\'' . self::dateFilter($from, $to);
+        $db = Db::getInstance();
+
+        $totals = $db->getRow(
+            'SELECT COUNT(DISTINCT l.`id_order`) AS orders, COALESCE(SUM(l.`gift_qty`), 0) AS units,
+                    COALESCE(SUM(l.`gift_qty` * l.`original_price`), 0) AS value
+             FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l ' . $where
+        );
+        $topProduct = $db->getRow(
+            'SELECT l.`product_name`, SUM(l.`gift_qty`) AS units
+             FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l ' . $where . '
              GROUP BY l.`id_product`, l.`id_product_attribute`
-             ORDER BY cnt DESC'
+             ORDER BY units DESC'
         );
-
-        $topRule = Db::getInstance()->getRow(
-            'SELECT l.`rule_name`, COUNT(*) AS cnt
-             FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l
-             WHERE l.`id_order` > 0' . $dateFilter . '
+        $topRule = $db->getRow(
+            'SELECT l.`rule_name`, COUNT(DISTINCT l.`id_order`) AS orders
+             FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l ' . $where . '
              GROUP BY l.`id_josra_gift_rule`
-             ORDER BY cnt DESC'
-        );
-
-        $lowStock = (array)Db::getInstance()->executeS(
-            'SELECT DISTINCT rp.`id_product`, rp.`id_product_attribute`,
-                    COALESCE(sa.`quantity`, 0) AS stock_qty
-             FROM `' . _DB_PREFIX_ . 'josra_gift_rule_product` rp
-             INNER JOIN `' . _DB_PREFIX_ . 'josra_gift_rule_level` rl
-                     ON rl.`id_josra_gift_rule_level` = rp.`id_josra_gift_rule_level`
-             INNER JOIN `' . _DB_PREFIX_ . 'josra_gift_rule` r
-                     ON r.`id_josra_gift_rule` = rl.`id_josra_gift_rule` AND r.`active` = 1
-             LEFT JOIN `' . _DB_PREFIX_ . 'stock_available` sa
-                    ON sa.`id_product` = rp.`id_product`
-                   AND sa.`id_product_attribute` = rp.`id_product_attribute`
-             WHERE COALESCE(sa.`quantity`, 0) <= 5'
+             ORDER BY orders DESC'
         );
 
         return array(
-            'total_orders_with_gift' => (int)(isset($totals['total_orders_with_gift']) ? $totals['total_orders_with_gift'] : 0),
-            'total_gifted_value'     => (float)(isset($totals['total_gifted_value']) ? $totals['total_gifted_value'] : 0),
-            'top_product'            => $topProduct ? $topProduct : null,
-            'top_rule'               => $topRule ? $topRule : null,
-            'low_stock_alerts'       => $lowStock,
+            'orders' => (int)$totals['orders'],
+            'units' => (int)$totals['units'],
+            'value' => (float)$totals['value'],
+            'top_product' => $topProduct ? $topProduct['product_name'] : '',
+            'top_rule' => $topRule ? $topRule['rule_name'] : '',
         );
     }
 
-    public static function getRecentGifts($limit = 10, $dateFrom = null, $dateTo = null)
+    public static function getRecent($limit = 20, $from = null, $to = null)
     {
-        $dateFilter = '';
-        if ($dateFrom) {
-            $dateFilter .= ' AND l.`date_add` >= \'' . pSQL($dateFrom) . ' 00:00:00\'';
-        }
-        if ($dateTo) {
-            $dateFilter .= ' AND l.`date_add` <= \'' . pSQL($dateTo) . ' 23:59:59\'';
-        }
         return (array)Db::getInstance()->executeS(
-            'SELECT l.*, o.`reference` AS order_reference
+            'SELECT l.*, o.`reference`
              FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` l
              LEFT JOIN `' . _DB_PREFIX_ . 'orders` o ON o.`id_order` = l.`id_order`
-             WHERE l.`id_order` > 0' . $dateFilter . '
+             WHERE 1' . self::dateFilter($from, $to) . '
              ORDER BY l.`date_add` DESC
              LIMIT ' . (int)$limit
         );
+    }
+
+    /**
+     * Productos de regalo de reglas activas con poco stock.
+     */
+    public static function getLowStock($threshold, $idLang)
+    {
+        if (!Configuration::get('PS_STOCK_MANAGEMENT')) {
+            return array();
+        }
+        $rows = Db::getInstance()->executeS(
+            'SELECT DISTINCT l.`id_product`, l.`id_product_attribute`, r.`name` AS rule_name
+             FROM `' . _DB_PREFIX_ . 'josra_gift_rule_level` l
+             INNER JOIN `' . _DB_PREFIX_ . 'josra_gift_rule` r
+                     ON r.`id_josra_gift_rule` = l.`id_josra_gift_rule` AND r.`active` = 1'
+        );
+        $out = array();
+        foreach ((array)$rows as $row) {
+            $qty = (int)StockAvailable::getQuantityAvailableByProduct((int)$row['id_product'], (int)$row['id_product_attribute']);
+            if ($qty <= (int)$threshold) {
+                $name = JosraGiftRule::getProductName((int)$row['id_product'], $idLang);
+                if ($row['id_product_attribute']) {
+                    $name .= ' (' . JosraGiftRule::getCombinationName((int)$row['id_product_attribute'], $idLang) . ')';
+                }
+                $out[] = array(
+                    'id_product' => (int)$row['id_product'],
+                    'name' => $name,
+                    'rule_name' => $row['rule_name'],
+                    'quantity' => $qty,
+                );
+            }
+        }
+        return $out;
     }
 }

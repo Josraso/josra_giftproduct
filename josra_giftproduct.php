@@ -1,530 +1,568 @@
 <?php
 /**
- * josra_giftproduct - Módulo de producto regalo automático para PrestaShop
- * Compatible con PrestaShop 1.6, 1.7, 8.x y 9.x
+ * josra_giftproduct - Producto de regalo automático
+ *
+ * Añade solo al carrito un producto de regalo según reglas (importe, número
+ * de productos o un producto concreto), a precio cero y con etiqueta "REGALO".
+ * Compatible con PrestaShop 1.6, 1.7, 8 y 9 (PHP 5.6+). Sin overrides.
  *
  * @author    josra
- * @copyright 2024 josra
- * @license   MIT
+ * @copyright josra
+ * @license   Comercial
  */
 
 if (!defined('_PS_VERSION_')) {
     exit;
 }
 
-require_once dirname(__FILE__) . '/classes/JosraGiftManager.php';
 require_once dirname(__FILE__) . '/classes/JosraGiftRule.php';
+require_once dirname(__FILE__) . '/classes/JosraGiftCart.php';
 require_once dirname(__FILE__) . '/classes/JosraGiftOrderLog.php';
+require_once dirname(__FILE__) . '/classes/JosraGiftManager.php';
+require_once dirname(__FILE__) . '/classes/JosraGiftAdmin.php';
 
 class Josra_giftproduct extends Module
 {
-    /** @var string versión detectada: '16', '17', '8x', '9x' */
-    public $psVersionBranch;
+    /** @var JosraGiftManager */
+    protected $manager;
 
     public function __construct()
     {
-        $this->name            = 'josra_giftproduct';
-        $this->tab             = 'pricing_promotion';
-        $this->version         = '1.1.0';
-        $this->author          = 'josra';
-        $this->need_instance   = 1;
-        $this->bootstrap       = true;
-        $this->ps_versions_compliancy = array('min' => '1.6.0.0', 'max' => '9.99.99');
+        $this->name = 'josra_giftproduct';
+        $this->tab = 'pricing_promotion';
+        $this->version = '2.0.0';
+        $this->author = 'josra';
+        $this->need_instance = 0;
+        $this->bootstrap = true;
+        $this->ps_versions_compliancy = array('min' => '1.6.0.4', 'max' => '9.99.99');
 
         parent::__construct();
 
-        $this->displayName = $this->l('Gift Product - josra');
-        $this->description = $this->l('Añade automáticamente un producto de regalo según reglas de importe o cantidad.');
-
-        $this->psVersionBranch = $this->detectPsVersion();
+        $this->displayName = $this->l('Producto de regalo automático');
+        $this->description = $this->l('Mete solo un producto de regalo en el carrito según importe, cantidad o producto comprado, a precio cero y con etiqueta de regalo.');
+        $this->confirmUninstall = $this->l('Se borrarán las reglas y las estadísticas de regalos. ¿Seguro?');
     }
 
-    public function detectPsVersion()
+    public function getManager()
     {
-        $v = _PS_VERSION_;
-        if (version_compare($v, '9.0.0', '>=')) {
-            return '9x';
+        if (!$this->manager) {
+            $this->manager = new JosraGiftManager($this->context);
         }
-        if (version_compare($v, '8.0.0', '>=')) {
-            return '8x';
-        }
-        if (version_compare($v, '1.7.0.0', '>=')) {
-            return '17';
-        }
-        return '16';
+        return $this->manager;
+    }
+
+    public static function isPs17()
+    {
+        return version_compare(_PS_VERSION_, '1.7.0.0', '>=');
+    }
+
+    public static function hasOrderGrid()
+    {
+        return version_compare(_PS_VERSION_, '1.7.7.0', '>=');
     }
 
     // =========================================================================
-    // INSTALL / UNINSTALL
+    // INSTALACIÓN
     // =========================================================================
 
     public function install()
     {
-        if (!parent::install()) {
-            return false;
-        }
-        if (!$this->installDb()) {
-            return false;
-        }
-        $hooks = $this->getHooksByVersion();
-        foreach ($hooks as $hook) {
-            $this->registerHook($hook);
-        }
-        $this->setDefaultConfig();
-        return true;
+        return parent::install()
+            && $this->installDb()
+            && $this->registerHooks()
+            && $this->installConfig();
     }
 
     public function uninstall()
     {
-        $this->uninstallDb();
-        $this->deleteConfig();
+        // Primero los precios a cero de los carritos abiertos: si no, seguirían gratis.
+        JosraGiftCart::deleteAllSpecificPrices();
+        foreach (array('josra_gift_rule', 'josra_gift_rule_level', 'josra_gift_rule_restriction',
+            'josra_gift_cart', 'josra_gift_order_log', 'josra_gift_rule_product') as $table) {
+            Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . $table . '`');
+        }
+        foreach (JosraGiftAdmin::configKeys() as $key) {
+            Configuration::deleteByName($key);
+        }
+        foreach (array('JOSRA_GIFT_CALC_MODE', 'JOSRA_GIFT_INCLUDE_SHIPPING') as $key) {
+            Configuration::deleteByName($key);
+        }
         return parent::uninstall();
     }
 
-    public function upgrade($currentVersion, $newVersion)
+    public function installDb()
     {
-        $sqlFile = dirname(__FILE__) . '/sql/upgrade.sql';
-        if (!file_exists($sqlFile)) {
-            return true;
+        $sql = Tools::file_get_contents(dirname(__FILE__) . '/sql/install.sql');
+        if (!$sql) {
+            return false;
         }
-        $sql = Tools::file_get_contents($sqlFile);
-        $sql = str_replace('PREFIX_', _DB_PREFIX_, $sql);
-        $queries = array_filter(array_map('trim', explode(';', $sql)));
-        foreach ($queries as $query) {
-            if (!empty($query)) {
-                Db::getInstance()->execute($query);
-            }
-        }
-        return true;
-    }
-
-    private function installDb()
-    {
-        $sqlFile = dirname(__FILE__) . '/sql/install.sql';
-        $sql = Tools::file_get_contents($sqlFile);
-        $sql = str_replace('PREFIX_', _DB_PREFIX_, $sql);
-        $queries = array_filter(array_map('trim', explode(';', $sql)));
-        foreach ($queries as $query) {
-            if (!empty($query) && !Db::getInstance()->execute($query)) {
+        $sql = str_replace(array('PREFIX_', 'ENGINE_TYPE'), array(_DB_PREFIX_, _MYSQL_ENGINE_), $sql);
+        foreach (array_filter(array_map('trim', explode(';', $sql))) as $query) {
+            if (!Db::getInstance()->execute($query)) {
                 return false;
             }
         }
-        // Ensure columns added in later versions exist on pre-existing tables
-        $this->upgrade('1.0.0', $this->version);
         return true;
     }
 
-    private function uninstallDb()
+    public function getHookList()
     {
-        $tables = array(
-            'josra_gift_rule',
-            'josra_gift_rule_level',
-            'josra_gift_rule_product',
-            'josra_gift_rule_restriction',
-            'josra_gift_order_log',
-        );
-        foreach ($tables as $table) {
-            Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . $table . '`');
-        }
-    }
-
-    private function deleteConfig()
-    {
-        $keys = array(
-            'JOSRA_GIFT_BADGE_TEXT',
-            'JOSRA_GIFT_BADGE_BG_COLOR',
-            'JOSRA_GIFT_BADGE_TEXT_COLOR',
-            'JOSRA_GIFT_MOTIVATIONAL_TEXT',
-            'JOSRA_GIFT_CALC_MODE',
-            'JOSRA_GIFT_INCLUDE_SHIPPING',
-        );
-        foreach ($keys as $key) {
-            Configuration::deleteByName($key);
-        }
-    }
-
-    private function setDefaultConfig()
-    {
-        $langs = Language::getLanguages(false);
-        foreach ($langs as $lang) {
-            $id = (int)$lang['id_lang'];
-            Configuration::updateValue('JOSRA_GIFT_BADGE_TEXT', 'REGALO', false, null, $id);
-            Configuration::updateValue('JOSRA_GIFT_MOTIVATIONAL_TEXT', 'Te faltan {amount} para conseguir tu regalo', false, null, $id);
-        }
-        Configuration::updateValue('JOSRA_GIFT_BADGE_BG_COLOR', '#e74c3c');
-        Configuration::updateValue('JOSRA_GIFT_BADGE_TEXT_COLOR', '#ffffff');
-        Configuration::updateValue('JOSRA_GIFT_CALC_MODE', 'without_tax');
-        Configuration::updateValue('JOSRA_GIFT_INCLUDE_SHIPPING', '0');
-    }
-
-    // =========================================================================
-    // HOOKS POR VERSIÓN
-    // =========================================================================
-
-    private function getHooksByVersion()
-    {
-        $common = array(
-            'displayHeader',
-            'actionValidateOrder',
-            'actionOrderStatusUpdate',
-            'displayOrderDetail',
-            'displayOrderConfirmation',
-            'displayPDFInvoice',
-            'displayAdminOrdersExtra',
-            'actionOrderReturn',
-        );
-
-        $version16 = array(
+        $hooks = array(
             'actionCartSave',
+            'actionValidateOrder',
+            'actionOrderStatusPostUpdate',
             'displayShoppingCartFooter',
         );
-
-        $version17plus = array(
-            'actionCartUpdateQuantity',
-            'actionAfterDeleteProductInCart',
-            'displayCartExtraProductActions',
-        );
-
-        $version9 = array(
-            'actionAfterDeleteProductInCart',
-            'displayCartExtraProductActions',
-            'displayAdminOrdersView',
-        );
-
-        switch ($this->psVersionBranch) {
-            case '16':
-                return array_merge($common, $version16);
-            case '9x':
-                return array_merge($common, $version17plus, $version9);
-            default:
-                return array_merge($common, $version17plus);
+        if (self::isPs17()) {
+            $hooks[] = 'actionFrontControllerSetMedia';
+            $hooks[] = 'actionObjectProductInCartDeleteAfter';
+            $hooks[] = 'displayCartExtraProductActions';
+        } else {
+            $hooks[] = 'displayHeader';
+            $hooks[] = 'actionAfterDeleteProductInCart';
         }
+        if (self::hasOrderGrid()) {
+            $hooks[] = 'actionOrderGridDefinitionModifier';
+            $hooks[] = 'actionOrderGridQueryBuilderModifier';
+            $hooks[] = 'displayAdminOrderSide';
+        } else {
+            $hooks[] = 'actionAdminOrdersListingFieldsModifier';
+            $hooks[] = 'displayAdminOrder';
+        }
+        return $hooks;
+    }
+
+    public function registerHooks()
+    {
+        foreach ($this->getHookList() as $hook) {
+            if (!$this->registerHook($hook)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public function installConfig()
+    {
+        $badge = array();
+        $motiv = array();
+        foreach (Language::getLanguages(false) as $lang) {
+            $badge[(int)$lang['id_lang']] = 'REGALO';
+            $motiv[(int)$lang['id_lang']] = 'Te faltan {amount} para llevarte de regalo: {gift}';
+        }
+        $defaults = array(
+            'JOSRA_GIFT_BADGE_BG_COLOR' => '#e74c3c',
+            'JOSRA_GIFT_BADGE_TEXT_COLOR' => '#ffffff',
+            'JOSRA_GIFT_SHOW_PROGRESS' => 1,
+            'JOSRA_GIFT_MARK_ORDER_LINE' => 1,
+            'JOSRA_GIFT_LOW_STOCK' => 5,
+            'JOSRA_GIFT_DEBUG' => 0,
+        );
+        foreach ($defaults as $key => $value) {
+            if (Configuration::get($key) === false) {
+                Configuration::updateValue($key, $value);
+            }
+        }
+        if (!Configuration::get('JOSRA_GIFT_BADGE_TEXT', (int)Configuration::get('PS_LANG_DEFAULT'))) {
+            Configuration::updateValue('JOSRA_GIFT_BADGE_TEXT', $badge);
+        }
+        if (Configuration::get('JOSRA_GIFT_MOTIVATIONAL_TEXT', (int)Configuration::get('PS_LANG_DEFAULT')) === false) {
+            Configuration::updateValue('JOSRA_GIFT_MOTIVATIONAL_TEXT', $motiv);
+        }
+        return true;
     }
 
     // =========================================================================
-    // CONFIGURACIÓN
+    // CONFIGURACIÓN (Módulos > Configurar)
     // =========================================================================
 
     public function getContent()
     {
-        $output = '';
-        if (Tools::isSubmit('submitJosraGiftConfig')) {
-            $output .= $this->saveGlobalConfig();
-        }
-        return $output . $this->renderConfigPage();
+        $admin = new JosraGiftAdmin($this);
+        return $admin->getContent();
     }
 
-    private function saveGlobalConfig()
+    public function fetchTemplate($name)
     {
-        $langs = Language::getLanguages(false);
-        foreach ($langs as $lang) {
-            $id = (int)$lang['id_lang'];
-            $badgeVal = Tools::getValue('JOSRA_GIFT_BADGE_TEXT_' . $id, 'REGALO');
-            $motivVal = Tools::getValue('JOSRA_GIFT_MOTIVATIONAL_TEXT_' . $id, '');
-            Configuration::updateValue('JOSRA_GIFT_BADGE_TEXT', $badgeVal, false, null, $id);
-            Configuration::updateValue('JOSRA_GIFT_MOTIVATIONAL_TEXT', $motivVal, false, null, $id);
-        }
-        Configuration::updateValue('JOSRA_GIFT_BADGE_BG_COLOR', Tools::getValue('JOSRA_GIFT_BADGE_BG_COLOR', '#e74c3c'));
-        Configuration::updateValue('JOSRA_GIFT_BADGE_TEXT_COLOR', Tools::getValue('JOSRA_GIFT_BADGE_TEXT_COLOR', '#ffffff'));
-        Configuration::updateValue('JOSRA_GIFT_CALC_MODE', Tools::getValue('JOSRA_GIFT_CALC_MODE', 'without_tax'));
-        Configuration::updateValue('JOSRA_GIFT_INCLUDE_SHIPPING', (int)Tools::getValue('JOSRA_GIFT_INCLUDE_SHIPPING', 0));
-        return $this->displayConfirmation($this->l('Configuración guardada correctamente.'));
-    }
-
-    private function renderConfigPage()
-    {
-        $langs     = Language::getLanguages(false);
-        $badgeText = array();
-        $motivText = array();
-        foreach ($langs as $lang) {
-            $id = (int)$lang['id_lang'];
-            $badgeText[$id] = Configuration::get('JOSRA_GIFT_BADGE_TEXT', $id);
-            $motivText[$id] = Configuration::get('JOSRA_GIFT_MOTIVATIONAL_TEXT', $id);
-        }
-
-        $this->context->smarty->assign(array(
-            'module_dir'        => $this->_path,
-            'ps_version_branch' => $this->psVersionBranch,
-            'ps_version'        => _PS_VERSION_,
-            'languages'         => $langs,
-            'id_lang_default'   => (int)Configuration::get('PS_LANG_DEFAULT'),
-            'badge_text'        => $badgeText,
-            'badge_bg_color'    => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
-            'badge_text_color'  => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
-            'motivational_text' => $motivText,
-            'calc_mode'         => Configuration::get('JOSRA_GIFT_CALC_MODE'),
-            'include_shipping'  => (int)Configuration::get('JOSRA_GIFT_INCLUDE_SHIPPING'),
-            'rules'             => JosraGiftRule::getAllRulesWithStats(),
-            'stats'             => JosraGiftOrderLog::getGlobalStats(),
-            'admin_ajax_url'    => $this->context->link->getAdminLink('AdminJosraGiftAjax'),
-            'form_action'       => $this->context->link->getAdminLink('AdminModules') . '&configure=' . $this->name,
-        ));
-        return $this->display(__FILE__, 'views/templates/admin/config.tpl');
+        return $this->display(__FILE__, 'views/templates/' . $name);
     }
 
     // =========================================================================
-    // HOOKS FRONTEND — CARRITO
+    // UTILIDADES
+    // =========================================================================
+
+    public function formatPrice($amount, $currency = null)
+    {
+        if (!$currency) {
+            $currency = $this->context->currency;
+        } elseif (!is_object($currency)) {
+            $currency = Currency::getCurrencyInstance((int)$currency);
+        }
+        if (method_exists($this->context, 'getCurrentLocale')) {
+            $locale = $this->context->getCurrentLocale();
+            if ($locale && is_object($currency)) {
+                try {
+                    return $locale->formatPrice((float)$amount, $currency->iso_code);
+                } catch (Exception $e) {
+                    // sigue con el método antiguo
+                }
+            }
+        }
+        if (method_exists('Tools', 'displayPrice')) {
+            return Tools::displayPrice((float)$amount, $currency);
+        }
+        return number_format((float)$amount, 2, ',', '.') . ' ' . (is_object($currency) ? $currency->sign : '');
+    }
+
+    public function formatDate($date, $full = false)
+    {
+        if (version_compare(_PS_VERSION_, '8.0.0', '>=')) {
+            return Tools::displayDate($date, (bool)$full);
+        }
+        return Tools::displayDate($date, null, (bool)$full);
+    }
+
+    protected function getBadgeText($idLang = null)
+    {
+        $text = Configuration::get('JOSRA_GIFT_BADGE_TEXT', $idLang ? (int)$idLang : (int)$this->context->language->id);
+        return $text ? $text : 'REGALO';
+    }
+
+    protected function isCartPage()
+    {
+        $controller = $this->context->controller;
+        if (!is_object($controller)) {
+            return false;
+        }
+        $page = isset($controller->php_self) ? $controller->php_self : '';
+        return in_array($page, array('cart', 'order', 'order-opc', 'checkout'));
+    }
+
+    /**
+     * Línea del regalo en el carrito (para pintar la etiqueta).
+     */
+    public function getGiftLine($cart)
+    {
+        if (!Validate::isLoadedObject($cart)) {
+            return null;
+        }
+        $state = JosraGiftCart::get($cart->id);
+        if (!$state || !$state['in_cart']) {
+            return null;
+        }
+        $lineQty = 0;
+        $name = '';
+        foreach ($cart->getProducts() as $p) {
+            if ((int)$p['id_product'] === $state['id_product']
+                && (int)$p['id_product_attribute'] === $state['id_product_attribute']) {
+                $lineQty += (int)$p['cart_quantity'];
+                $name = $p['name'];
+            }
+        }
+        if (!$lineQty) {
+            return null;
+        }
+        $free = min($state['gift_qty'], $lineQty);
+        return array(
+            'id_product' => $state['id_product'],
+            'id_product_attribute' => $state['id_product_attribute'],
+            'name' => $name,
+            'free' => $free,
+            'line_qty' => $lineQty,
+            'label' => $free < $lineQty ? $free . ' x ' . $this->getBadgeText() : $this->getBadgeText(),
+        );
+    }
+
+    /**
+     * Bloque del carrito: regalo rechazado + mensaje y barra de progreso.
+     */
+    public function renderCartBlock($cart)
+    {
+        $declined = null;
+        $goal = null;
+        $gift = null;
+        if (Validate::isLoadedObject($cart)) {
+            $state = JosraGiftCart::get($cart->id);
+            if ($state && $state['declined'] && $state['id_product']) {
+                $level = array(
+                    'id_product' => $state['id_product'],
+                    'gift_qty' => $state['gift_qty'],
+                    'combination_name' => $state['id_product_attribute']
+                        ? JosraGiftRule::getCombinationName($state['id_product_attribute'], (int)$this->context->language->id)
+                        : '',
+                );
+                $declined = $this->getManager()->giftLabel($level);
+            }
+            if ($state && $state['in_cart']) {
+                $level = array(
+                    'id_product' => $state['id_product'],
+                    'gift_qty' => $state['gift_qty'],
+                    'combination_name' => $state['id_product_attribute']
+                        ? JosraGiftRule::getCombinationName($state['id_product_attribute'], (int)$this->context->language->id)
+                        : '',
+                );
+                $gift = $this->getManager()->giftLabel($level);
+            }
+            $text = Configuration::get('JOSRA_GIFT_MOTIVATIONAL_TEXT', (int)$this->context->language->id);
+            if ($text && !$declined) {
+                $next = $this->getManager()->getNextGoal($cart);
+                if ($next) {
+                    $amount = $next['is_quantity']
+                        ? sprintf($next['missing'] == 1 ? $this->l('%d producto') : $this->l('%d productos'), $next['missing'])
+                        : $this->formatPrice(
+                            $this->getManager()->fromDefaultCurrency($next['missing'], (int)$cart->id_currency),
+                            (int)$cart->id_currency
+                        );
+                    $goal = array(
+                        'text' => str_replace(array('{amount}', '{gift}'), array($amount, $next['gift']), $text),
+                        'percent' => $next['percent'],
+                    );
+                }
+            }
+        }
+
+        $this->context->smarty->assign(array(
+            'josra_declined' => $declined,
+            'josra_goal' => $goal,
+            'josra_gift' => $gift,
+            'josra_show_progress' => (int)Configuration::get('JOSRA_GIFT_SHOW_PROGRESS'),
+            'josra_ps17' => self::isPs17(),
+        ));
+        return $this->display(__FILE__, 'views/templates/hook/cart_block.tpl');
+    }
+
+    // =========================================================================
+    // HOOKS: CARRITO
     // =========================================================================
 
     public function hookActionCartSave($params)
     {
         $cart = isset($params['cart']) ? $params['cart'] : $this->context->cart;
-        $this->processCart($cart);
+        $this->getManager()->sync($cart);
     }
 
-    public function hookActionCartUpdateQuantity($params)
+    /** 1.7, 8, 9 */
+    public function hookActionObjectProductInCartDeleteAfter($params)
     {
-        $cart = isset($params['cart']) ? $params['cart'] : $this->context->cart;
-        JosraGiftManager::log('[hook] actionCartUpdateQuantity cart=' . ($cart ? (int)$cart->id : 'null'));
-        if ($cart) {
-            $this->processCart($cart);
-        }
+        $this->getManager()->sync($this->context->cart);
     }
 
+    /** 1.6 */
     public function hookActionAfterDeleteProductInCart($params)
     {
-        $cart = isset($params['cart']) ? $params['cart'] : $this->context->cart;
-        if (!$cart) {
-            return;
-        }
-        $deletedProductId = (int)(isset($params['id_product']) ? $params['id_product'] : 0);
-        $deletedAttrId    = (int)(isset($params['id_product_attribute']) ? $params['id_product_attribute'] : 0);
-
-        $giftManager = new JosraGiftManager($this->context, $this->psVersionBranch);
-        if ($giftManager->isGiftProduct($cart, $deletedProductId, $deletedAttrId)) {
-            $this->context->cookie->josra_gift_deleted = 1;
-            $this->context->cookie->josra_gift_deleted_time = time();
-            $this->context->cookie->write();
-            return;
-        }
-        $this->processCart($cart);
-    }
-
-    private function processCart($cart)
-    {
-        if (!Validate::isLoadedObject($cart)) {
-            return;
-        }
-        $giftManager = new JosraGiftManager($this->context, $this->psVersionBranch);
-        $giftManager->evaluateAndApply($cart);
+        $this->getManager()->sync($this->context->cart);
     }
 
     // =========================================================================
-    // HOOKS FRONTEND — VISUALIZACIÓN
+    // HOOKS: FRONT
     // =========================================================================
 
-    public function hookDisplayHeader()
+    /** 1.7, 8, 9 */
+    public function hookActionFrontControllerSetMedia($params)
     {
-        // Evaluar carrito en cada carga de página como backup
-        if ($this->context->cart && Validate::isLoadedObject($this->context->cart) && $this->context->cart->id) {
-            JosraGiftManager::log('[displayHeader] evaluando carrito=' . (int)$this->context->cart->id);
-            $this->processCart($this->context->cart);
+        $this->frontAssets();
+    }
+
+    /** 1.6 */
+    public function hookDisplayHeader($params)
+    {
+        $this->frontAssets();
+    }
+
+    protected function frontAssets()
+    {
+        $controller = $this->context->controller;
+        if (!is_object($controller) || ($controller instanceof ModuleFrontController && isset($controller->module)
+            && is_object($controller->module) && $controller->module->name === $this->name)) {
+            return;
+        }
+        $cart = $this->context->cart;
+        $hasCart = is_object($cart) && Validate::isLoadedObject($cart);
+
+        // Red de seguridad en carrito y checkout: reglas caducadas, stock, etc.
+        if ($hasCart && $this->isCartPage()) {
+            $this->getManager()->sync($cart);
         }
 
-        if ($this->psVersionBranch === '16') {
-            $this->context->controller->addCSS($this->_path . 'views/css/josra_gift_front.css');
-            $this->context->controller->addJS($this->_path . 'views/js/josra_gift_cart.js');
+        if (self::isPs17()) {
+            $controller->registerStylesheet('josra-gift', 'modules/' . $this->name . '/views/css/front.css', array('media' => 'all', 'priority' => 150));
+            $controller->registerJavascript('josra-gift', 'modules/' . $this->name . '/views/js/front.js', array('position' => 'bottom', 'priority' => 150));
         } else {
-            $this->context->controller->registerStylesheet(
-                'josra-gift-front',
-                $this->_path . 'views/css/josra_gift_front.css',
-                array('media' => 'all', 'priority' => 150)
-            );
-            $this->context->controller->registerJavascript(
-                'josra-gift-cart',
-                $this->_path . 'views/js/josra_gift_cart.js',
-                array('position' => 'bottom', 'priority' => 150)
-            );
+            $controller->addCSS($this->_path . 'views/css/front.css');
+            $controller->addJS($this->_path . 'views/js/front.js');
         }
 
-        // Calcular texto motivacional (cuánto falta para el siguiente regalo)
-        $motivationalText = '';
-        if ($this->context->cart && Validate::isLoadedObject($this->context->cart) && $this->context->cart->id) {
-            $giftManager = new JosraGiftManager($this->context, $this->psVersionBranch);
-            $nextInfo    = $giftManager->getNextRuleInfo($this->context->cart);
-            if ($nextInfo) {
-                $raw = Configuration::get('JOSRA_GIFT_MOTIVATIONAL_TEXT', $this->context->language->id);
-                $motivationalText = str_replace('{amount}', $this->formatPrice($nextInfo['amount_missing']), $raw);
-            }
+        $notice = $hasCart ? JosraGiftCart::popNotice($cart->id) : null;
+        Media::addJsDef(array('josraGift' => array(
+            'ajaxUrl' => $this->context->link->getModuleLink($this->name, 'ajax', array(), true),
+            'ps17' => self::isPs17(),
+            'gift' => $hasCart ? $this->getGiftLine($cart) : null,
+            'notice' => $notice ? $this->noticeText($notice) : '',
+            'bg' => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
+            'fg' => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
+        )));
+    }
+
+    public function noticeText($notice)
+    {
+        $gift = isset($notice['data']['gift']) ? $notice['data']['gift'] : '';
+        switch ($notice['type']) {
+            case 'unlocked':
+                return sprintf($this->l('¡Has conseguido un regalo: %s!'), $gift);
+            case 'upgraded':
+                return sprintf($this->l('¡Regalo mejorado! Ahora te llevas: %s'), $gift);
+            case 'fallback':
+                $wanted = isset($notice['data']['wanted']) ? $notice['data']['wanted'] : '';
+                return sprintf($this->l('Se ha agotado %s. Te llevas de regalo: %s'), $wanted, $gift);
         }
-
-        $deletedFlag  = $this->context->cookie->josra_gift_deleted  ? 1 : 0;
-        $unlockedFlag = $this->context->cookie->josra_gift_unlocked ? 1 : 0;
-
-        $this->context->smarty->assign(array(
-            'josra_ajax_url'          => $this->context->link->getModuleLink($this->name, 'ajax', array(), true),
-            'josra_badge_text'        => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
-            'josra_badge_bg'          => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
-            'josra_badge_fg'          => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
-            'josra_restore_label'     => $this->l('Restaurar mi regalo'),
-            'josra_deleted_warning'   => $this->l('Has eliminado tu producto de regalo.'),
-            'josra_unlocked_msg'      => $this->l('¡Has desbloqueado un regalo!'),
-            'josra_upgraded_msg'      => $this->l('¡Has conseguido un regalo mejor!'),
-            'josra_motivational_text' => $motivationalText,
-            'josra_gift_deleted'      => $deletedFlag,
-            'josra_gift_unlocked'     => $unlockedFlag,
-        ));
-
-        if ($deletedFlag) {
-            $this->context->cookie->josra_gift_deleted = 0;
-            $this->context->cookie->write();
-        }
-        if ($unlockedFlag) {
-            $this->context->cookie->josra_gift_unlocked = 0;
-            $this->context->cookie->write();
-        }
-
-        return $this->display(__FILE__, 'views/templates/hook/header_js.tpl');
+        return '';
     }
 
     public function hookDisplayShoppingCartFooter($params)
     {
-        $cart = isset($params['cart']) ? $params['cart'] : $this->context->cart;
-        return $this->renderCartHook($cart);
+        return $this->renderCartBlock($this->context->cart);
     }
 
+    /** Etiqueta en la línea del carrito (1.7, 8, 9). */
     public function hookDisplayCartExtraProductActions($params)
     {
-        $cart      = $this->context->cart;
-        $productId = (int)(isset($params['product']['id_product']) ? $params['product']['id_product'] : 0);
-        $attrId    = (int)(isset($params['product']['id_product_attribute']) ? $params['product']['id_product_attribute'] : 0);
-
-        $giftManager = new JosraGiftManager($this->context, $this->psVersionBranch);
-        if (!$giftManager->isGiftProduct($cart, $productId, $attrId)) {
+        if (empty($params['product'])) {
             return '';
         }
-
+        $product = $params['product'];
+        if (is_object($product) && method_exists($product, 'offsetGet')) {
+            $idProduct = (int)$product['id_product'];
+            $idAttr = (int)$product['id_product_attribute'];
+        } else {
+            $product = (array)$product;
+            $idProduct = isset($product['id_product']) ? (int)$product['id_product'] : 0;
+            $idAttr = isset($product['id_product_attribute']) ? (int)$product['id_product_attribute'] : 0;
+        }
+        $line = $this->getGiftLine($this->context->cart);
+        if (!$line || $line['id_product'] !== $idProduct || $line['id_product_attribute'] !== $idAttr) {
+            return '';
+        }
         $this->context->smarty->assign(array(
-            'josra_badge_text' => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
-            'josra_badge_bg'   => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
-            'josra_badge_fg'   => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
+            'josra_badge' => $line['label'],
+            'josra_badge_bg' => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
+            'josra_badge_fg' => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
         ));
         return $this->display(__FILE__, 'views/templates/hook/badge.tpl');
     }
 
-    private function renderCartHook($cart)
-    {
-        if (!Validate::isLoadedObject($cart)) {
-            return '';
-        }
-        $giftManager  = new JosraGiftManager($this->context, $this->psVersionBranch);
-        $nextRuleInfo = $giftManager->getNextRuleInfo($cart);
-        if (!$nextRuleInfo) {
-            return '';
-        }
-        $motivText = Configuration::get('JOSRA_GIFT_MOTIVATIONAL_TEXT', $this->context->language->id);
-        $motivText = str_replace(
-            '{amount}',
-            Tools::displayPrice($nextRuleInfo['amount_missing'], $this->context->currency),
-            $motivText
-        );
-        $this->context->smarty->assign(array(
-            'josra_motiv_text' => $motivText,
-            'josra_next_rule'  => $nextRuleInfo,
-        ));
-        return $this->display(__FILE__, 'views/templates/hook/motivational.tpl');
-    }
-
     // =========================================================================
-    // HOOKS PEDIDO
+    // HOOKS: PEDIDOS
     // =========================================================================
 
     public function hookActionValidateOrder($params)
     {
-        $order = isset($params['order']) ? $params['order'] : null;
-        $cart  = isset($params['cart'])  ? $params['cart']  : null;
-        if (!$order || !$cart) {
+        if (empty($params['order']) || empty($params['cart'])) {
             return;
         }
-        $giftManager = new JosraGiftManager($this->context, $this->psVersionBranch);
-        $giftManager->logOrderGift($order, $cart);
+        $this->getManager()->onOrderValidated($params['order'], $params['cart']);
     }
 
-    public function hookActionOrderReturn($params)
+    public function hookActionOrderStatusPostUpdate($params)
     {
-        $orderReturn = isset($params['orderReturn']) ? $params['orderReturn'] : null;
-        if (!$orderReturn) {
+        if (empty($params['id_order']) || empty($params['newOrderStatus'])) {
             return;
         }
-        $giftManager = new JosraGiftManager($this->context, $this->psVersionBranch);
-        $giftManager->handleReturn($orderReturn);
+        $this->getManager()->onOrderStatusChanged((int)$params['id_order'], (int)$params['newOrderStatus']->id);
     }
 
-    public function hookDisplayOrderDetail($params)
+    // =========================================================================
+    // HOOKS: BACK-OFFICE PEDIDOS
+    // =========================================================================
+
+    /** Ficha del pedido 1.7.7, 8 y 9 */
+    public function hookDisplayAdminOrderSide($params)
     {
-        $order = isset($params['order']) ? $params['order'] : null;
-        if (!$order) {
-            return '';
-        }
-        $log = JosraGiftOrderLog::getByOrderId((int)$order->id);
+        return $this->renderOrderPanel(isset($params['id_order']) ? (int)$params['id_order'] : 0, true);
+    }
+
+    /** Ficha del pedido 1.6 y 1.7.0 - 1.7.6 */
+    public function hookDisplayAdminOrder($params)
+    {
+        return $this->renderOrderPanel(isset($params['id_order']) ? (int)$params['id_order'] : (int)Tools::getValue('id_order'), false);
+    }
+
+    protected function renderOrderPanel($idOrder, $card)
+    {
+        $log = $idOrder ? JosraGiftOrderLog::getByOrderId($idOrder) : null;
         if (!$log) {
             return '';
         }
+        $order = new Order($idOrder);
+        $currency = Validate::isLoadedObject($order) ? (int)$order->id_currency : null;
         $this->context->smarty->assign(array(
-            'josra_gift_log'            => $log,
-            'josra_gift_original_price' => $this->formatPrice((float)$log['original_price']),
-            'josra_badge_text'          => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
+            'josra_log' => $log,
+            'josra_card' => $card,
+            'josra_unit_price' => $this->formatPrice((float)$log['original_price'], $currency),
+            'josra_total_price' => $this->formatPrice((float)$log['original_price'] * (int)$log['gift_qty'], $currency),
+            'josra_badge' => $this->getBadgeText(),
+            'josra_badge_bg' => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
+            'josra_badge_fg' => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
         ));
-        return $this->display(__FILE__, 'views/templates/hook/order_detail.tpl');
+        return $this->display(__FILE__, 'views/templates/admin/order_panel.tpl');
     }
 
-    public function hookDisplayOrderConfirmation($params)
+    /** Columna "Regalo" en el listado de pedidos 1.6 y 1.7.0 - 1.7.6 */
+    public function hookActionAdminOrdersListingFieldsModifier($params)
     {
-        return $this->hookDisplayOrderDetail($params);
-    }
-
-    public function hookDisplayPDFInvoice($params)
-    {
-        $order = isset($params['object']) ? $params['object'] : null;
-        if (!$order) {
-            return '';
+        if (isset($params['select']) && strpos($params['select'], 'josra_gift') === false) {
+            $params['select'] .= ($params['select'] ? ', ' : '') . 'jgl.`product_name` AS josra_gift';
         }
-        $log = JosraGiftOrderLog::getByOrderId((int)$order->id);
-        if (!$log) {
-            return '';
+        if (isset($params['join']) && strpos($params['join'], 'josra_gift_order_log') === false) {
+            $params['join'] .= ' LEFT JOIN `' . _DB_PREFIX_ . 'josra_gift_order_log` jgl
+                ON (jgl.`id_order` = a.`id_order` AND jgl.`status` = \'valid\')';
         }
-        $this->context->smarty->assign(array(
-            'josra_gift_log'   => $log,
-            'josra_badge_text' => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
-        ));
-        return $this->display(__FILE__, 'views/templates/hook/pdf_invoice.tpl');
+        if (isset($params['fields'])) {
+            $params['fields']['josra_gift'] = array(
+                'title' => $this->l('Regalo'),
+                'search' => false,
+                'orderby' => false,
+                'havingFilter' => false,
+            );
+        }
     }
 
-    public function hookDisplayAdminOrdersExtra($params)
+    /** Columna "Regalo" en el listado de pedidos 1.7.7, 8 y 9 */
+    public function hookActionOrderGridDefinitionModifier($params)
     {
-        $orderId = (int)(isset($params['id_order']) ? $params['id_order'] : Tools::getValue('id_order'));
-        if (!$orderId) {
-            return '';
+        if (empty($params['definition'])) {
+            return;
         }
-        $log = JosraGiftOrderLog::getByOrderId($orderId);
-        if (!$log) {
-            return '';
+        $columns = $params['definition']->getColumns();
+        $class = 'PrestaShop\PrestaShop\Core\Grid\Column\Type\DataColumn';
+        if (!class_exists($class)) {
+            return;
         }
-        $this->context->smarty->assign(array(
-            'josra_gift_log'            => $log,
-            'josra_gift_original_price' => $this->formatPrice((float)$log['original_price']),
-            'josra_badge_text'          => Configuration::get('JOSRA_GIFT_BADGE_TEXT', $this->context->language->id),
-        ));
-        return $this->display(__FILE__, 'views/templates/admin/order_gift_info.tpl');
+        $column = new $class('josra_gift');
+        $column->setName($this->l('Regalo'));
+        $column->setOptions(array('field' => 'josra_gift'));
+        try {
+            $columns->addAfter('total_paid_tax_incl', $column);
+        } catch (Exception $e) {
+            try {
+                $columns->addBefore('actions', $column);
+            } catch (Exception $e2) {
+                $columns->add($column);
+            }
+        }
     }
 
-    public function hookDisplayAdminOrdersView($params)
+    public function hookActionOrderGridQueryBuilderModifier($params)
     {
-        return $this->hookDisplayAdminOrdersExtra($params);
-    }
-
-    private function formatPrice($price)
-    {
-        $currency = $this->context->currency;
-        if (method_exists('Tools', 'displayPrice')) {
-            return Tools::displayPrice($price, $currency);
+        if (empty($params['search_query_builder'])) {
+            return;
         }
-        $sign = $currency ? $currency->sign : '€';
-        return number_format($price, 2, ',', '.') . ' ' . $sign;
-    }
-
-    public function hookActionOrderStatusUpdate($params)
-    {
-        // Reservado para futuras notificaciones
+        $qb = $params['search_query_builder'];
+        $qb->addSelect('jgl.`product_name` AS josra_gift');
+        $qb->leftJoin(
+            'o',
+            '`' . _DB_PREFIX_ . 'josra_gift_order_log`',
+            'jgl',
+            'jgl.`id_order` = o.`id_order` AND jgl.`status` = \'valid\''
+        );
     }
 }
