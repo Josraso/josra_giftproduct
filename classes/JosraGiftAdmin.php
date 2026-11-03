@@ -293,9 +293,9 @@ class JosraGiftAdmin
 
         $html = $helper->generateList($rows, $fields);
         if (!$rows) {
-            $html .= $this->module->displayInformation(
-                $this->l('Todavía no hay reglas. Pulsa el botón + de la lista para crear la primera.')
-            );
+            $html .= '<div class="alert alert-info">'
+                . Tools::safeOutput($this->l('Todavía no hay reglas. Pulsa el botón + de la lista para crear la primera.'))
+                . '</div>';
         }
         return $html;
     }

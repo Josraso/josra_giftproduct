@@ -273,11 +273,15 @@ class JosraGiftManager
 
         $rules = $this->getApplicableRules($cart);
         if ($state['in_cart'] && $state['id_josra_gift_rule']) {
-            // Primero la regla que ya está dando regalo.
-            usort($rules, function ($a, $b) use ($state) {
-                return ((int)$b['id_josra_gift_rule'] === $state['id_josra_gift_rule'])
-                    - ((int)$a['id_josra_gift_rule'] === $state['id_josra_gift_rule']);
-            });
+            // Ya hay regalo: solo se anima a subir de tramo en la misma regla
+            // (otra regla no lo cambiaría si tiene menos prioridad).
+            $current = array();
+            foreach ($rules as $rule) {
+                if ((int)$rule['id_josra_gift_rule'] === $state['id_josra_gift_rule']) {
+                    $current[] = $rule;
+                }
+            }
+            $rules = $current;
         }
 
         foreach ($rules as $rule) {
