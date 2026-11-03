@@ -1,0 +1,68 @@
+/* josra_giftproduct - front */
+.josra-gift-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    margin-left: 6px;
+    border-radius: 3px;
+    background-color: #e74c3c;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.5;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.josra-gift-block { margin: 15px 0; }
+.josra-gift-block:empty { display: none; }
+
+.josra-gift-declined {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.josra-gift-current { margin: 0 0 10px; }
+
+.josra-gift-goal__text { margin: 0 0 6px; }
+
+.josra-gift-progress {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, .1);
+}
+.josra-gift-progress__bar {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: #2fb5d2;
+    transition: width .4s ease;
+}
+
+.josra-gift-toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 99999;
+    max-width: 360px;
+    padding: 12px 18px;
+    border-radius: 6px;
+    background: #24b9a0;
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .2);
+    opacity: 0;
+    transform: translateY(15px);
+    transition: opacity .3s ease, transform .3s ease;
+    pointer-events: none;
+}
+.josra-gift-toast--visible { opacity: 1; transform: translateY(0); }
+
+@media (max-width: 576px) {
+    .josra-gift-toast { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+}

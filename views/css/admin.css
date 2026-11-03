@@ -1,0 +1,15 @@
+/* josra_giftproduct - back-office (solo lo imprescindible para el buscador) */
+.josra-picker { position: relative; }
+.josra-picker .josra-picker-results {
+    width: 100%; max-height: 280px; overflow-y: auto; top: 100%; left: 0; z-index: 1060;
+}
+.josra-picker .josra-picker-results a { white-space: normal; }
+.josra-picker.has-error .josra-picker-input { border-color: #e84e6a; }
+.josra-levels-table td { vertical-align: top !important; }
+.josra-levels-table .josra-qty { width: 70px; }
+.josra-dates input[type="date"] { width: auto; display: inline-block; margin: 0 6px; }
+.josra-stats-filter { margin-bottom: 15px; }
+.josra-stats-filter input[type="date"] { width: auto; display: inline-block; margin: 0 6px; }
+.josra-kpis { margin: 10px 0 15px; }
+.josra-kpi-value { font-size: 24px; font-weight: 600; margin: 0; }
+.josra-kpi-value.josra-kpi-text { font-size: 15px; line-height: 2.2; }
