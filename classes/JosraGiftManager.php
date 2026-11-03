@@ -478,9 +478,9 @@ class JosraGiftManager
             return array('code' => 'no_product');
         }
 
-        // Unidades de regalo que quedan en la regla.
-        if ((int)$rule['max_uses'] > 0 && ((int)$rule['max_uses'] - (int)$rule['uses_count']) < $qty) {
-            return array('code' => 'uses', 'left' => max(0, (int)$rule['max_uses'] - (int)$rule['uses_count']), 'needed' => $qty);
+        // Regalos disponibles en la regla (se cuentan pedidos, como en 1.x).
+        if ((int)$rule['max_uses'] > 0 && (int)$rule['uses_count'] >= (int)$rule['max_uses']) {
+            return array('code' => 'uses', 'given' => (int)$rule['uses_count'], 'max' => (int)$rule['max_uses']);
         }
 
         $product = new Product($idProduct, false, (int)$this->context->language->id);
@@ -752,7 +752,7 @@ class JosraGiftManager
         $log->date_add = date('Y-m-d H:i:s');
         $log->add();
 
-        JosraGiftRule::addUses((int)$state['id_josra_gift_rule'], $free);
+        JosraGiftRule::addUses((int)$state['id_josra_gift_rule'], 1);
 
         if (Configuration::get('JOSRA_GIFT_MARK_ORDER_LINE')) {
             $label = Configuration::get('JOSRA_GIFT_BADGE_TEXT', (int)$order->id_lang);
@@ -790,10 +790,10 @@ class JosraGiftManager
         ));
         $isCancel = in_array((int)$idNewState, $cancelStates);
         if ($isCancel && $log['status'] === 'valid') {
-            JosraGiftRule::addUses((int)$log['id_josra_gift_rule'], -(int)$log['gift_qty']);
+            JosraGiftRule::addUses((int)$log['id_josra_gift_rule'], -1);
             JosraGiftOrderLog::setStatus((int)$log['id_josra_gift_order_log'], 'cancelled');
         } elseif (!$isCancel && $log['status'] === 'cancelled') {
-            JosraGiftRule::addUses((int)$log['id_josra_gift_rule'], (int)$log['gift_qty']);
+            JosraGiftRule::addUses((int)$log['id_josra_gift_rule'], 1);
             JosraGiftOrderLog::setStatus((int)$log['id_josra_gift_order_log'], 'valid');
         }
     }

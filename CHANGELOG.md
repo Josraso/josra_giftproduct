@@ -6,6 +6,8 @@ Reescritura de la base. Al actualizar desde 1.x se migran reglas, tramos y los
 regalos que ya haya en carritos abiertos (no se pasan a cobrar).
 
 ### Corregido
+- "Regalos disponibles" se vuelve a contar por pedidos, como en 1.x. La 2.0 lo contaba por unidades y
+  las reglas actualizadas (que guardaban pedidos) se daban por agotadas antes de tiempo.
 - Regalo de un producto con combinaciones guardado sin combinación: el precio a cero se aplicaba a todas
   las combinaciones, también a las que compraba el cliente. Ahora se usa la combinación por defecto y nunca
   se crea un precio a cero sin combinación en esos productos.
@@ -25,7 +27,7 @@ regalos que ya haya en carritos abiertos (no se pasan a cobrar).
 - JS escuchaba `updateCart` como evento del navegador: en 1.7+ se usa `prestashop.on()` y no se recarga la página.
 - Admin solo usable por SuperAdmin (controlador sin tab): todo pasa por `getContent()`.
 - Actualización: faltaba `upgrade-1.1.0.php`, `ADD COLUMN IF NOT EXISTS` fallaba en MySQL, `: bool` rompía PHP 5.6.
-- Devoluciones restaban usos al *solicitarlas*; ahora cancelado/reembolsado/error devuelve unidades y volver a un estado válido las descuenta.
+- Devoluciones restaban usos al *solicitarlas*; ahora cancelado/reembolsado/error devuelve el regalo a la regla y volver a un estado válido lo descuenta.
 - Valor regalado no multiplicaba por unidades; stock comprobado con las unidades a regalar.
 - Mensaje de reglas por cantidad decía "Te faltan 3,00 €"; importes de tramos se veían como `200,000000`.
 - Ajustes globales de IVA/envío que no se usaban: eliminados (van en cada regla).

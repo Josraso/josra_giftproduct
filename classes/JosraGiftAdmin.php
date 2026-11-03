@@ -263,7 +263,7 @@ class JosraGiftAdmin
             'type_label' => array('title' => $this->l('Se activa por')),
             'levels_label' => array('title' => $this->l('Tramos y regalos')),
             'dates_label' => array('title' => $this->l('Vigencia')),
-            'uses_label' => array('title' => $this->l('Entregados'), 'align' => 'center', 'class' => 'fixed-width-sm'),
+            'uses_label' => array('title' => $this->l('Regalos dados'), 'align' => 'center', 'class' => 'fixed-width-sm'),
             'orders_count' => array('title' => $this->l('Pedidos'), 'align' => 'center', 'class' => 'fixed-width-xs'),
             'priority' => array('title' => $this->l('Prioridad'), 'align' => 'center', 'class' => 'fixed-width-xs'),
             'warnings_label' => array('title' => $this->l('Estado')),
@@ -320,7 +320,7 @@ class JosraGiftAdmin
             $out[] = sprintf($this->l('Empieza el %s'), $this->module->formatDate($start));
         }
         if ((int)$rule['max_uses'] > 0 && (int)$rule['uses_count'] >= (int)$rule['max_uses']) {
-            $out[] = $this->l('Sin unidades de regalo disponibles');
+            $out[] = sprintf($this->l('Agotada: ya se han dado los %d regalos disponibles'), (int)$rule['max_uses']);
         }
         if ($rule['trigger_type'] === JosraGiftRule::TRIGGER_PRODUCT && !(int)$rule['id_trigger_product']) {
             $out[] = $this->l('Falta el producto que hay que comprar');
@@ -356,7 +356,7 @@ class JosraGiftAdmin
                     $out[] = sprintf($this->l('Tramo %d: stock %d de %d uds. necesarias'), $n, $problem['stock'], $problem['needed']);
                     break;
                 case 'uses':
-                    $out[] = sprintf($this->l('Tramo %d: quedan %d uds. de regalo y hacen falta %d'), $n, $problem['left'], $problem['needed']);
+                    // Ya se avisa una vez a nivel de regla.
                     break;
             }
         }
@@ -587,11 +587,11 @@ class JosraGiftAdmin
                     ),
                     array(
                         'type' => 'text',
-                        'label' => $this->l('Unidades de regalo disponibles'),
+                        'label' => $this->l('Regalos disponibles'),
                         'name' => 'max_uses',
                         'class' => 'fixed-width-sm',
-                        'desc' => $this->l('Cuando se entreguen todas, la regla deja de aplicarse. 0 = sin límite.')
-                            . ($isNew ? '' : ' ' . sprintf($this->l('Entregadas hasta ahora: %d.'), (int)$rule->uses_count)),
+                        'desc' => $this->l('Cuántos pedidos pueden llevarse este regalo (da igual cuántas unidades tenga cada uno). Al llegar al número, la regla deja de aplicarse. 0 = sin límite.')
+                            . ($isNew ? '' : ' ' . sprintf($this->l('Dados hasta ahora: %d.'), (int)$rule->uses_count)),
                     ),
                     array(
                         'type' => 'text',
