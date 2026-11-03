@@ -234,8 +234,9 @@ class Josra_giftproduct extends Module
         if (!is_object($controller)) {
             return false;
         }
-        $page = isset($controller->php_self) ? $controller->php_self : '';
-        return in_array($page, array('cart', 'order', 'order-opc', 'checkout'));
+        $page = isset($controller->php_self) ? (string)$controller->php_self : '';
+        // También los checkouts de módulos (josracheckout: module-josracheckout-checkout).
+        return in_array($page, array('cart', 'order', 'order-opc')) || strpos($page, 'checkout') !== false;
     }
 
     /**
@@ -374,6 +375,12 @@ class Josra_giftproduct extends Module
         $controller = $this->context->controller;
         if (!is_object($controller) || ($controller instanceof ModuleFrontController && isset($controller->module)
             && is_object($controller->module) && $controller->module->name === $this->name)) {
+            return;
+        }
+        // Peticiones AJAX de otros módulos (p. ej. josracheckout): ni recursos ni avisos,
+        // que se consumirían sin llegar a verse.
+        if (Tools::getValue('ajax') || (isset($_SERVER['HTTP_X_REQUESTED_WITH'])
+            && Tools::strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest')) {
             return;
         }
         $cart = $this->context->cart;

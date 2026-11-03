@@ -74,13 +74,16 @@
         var pid = String(cfg.gift.id_product);
         var aid = String(cfg.gift.id_product_attribute);
 
-        // 1.7+: línea del carrito por sus atributos data-*.
+        // Línea del carrito por sus atributos data-* (carrito 1.7+, josracheckout y checkouts parecidos).
         var links = document.querySelectorAll('[data-id-product="' + pid + '"][data-id-product-attribute="' + aid + '"]');
         Array.prototype.forEach.call(links, function (el) {
-            var item = closest(el, '.cart-item, .product-line-grid');
+            if (closest(el, '.josra-gift-block')) {
+                return;
+            }
+            var item = closest(el, '.cart-item, .product-line-grid, .jco-item');
             if (item) {
                 addBadgeTo(item, item.querySelector('.product-line-info.product-price, .product-price, .current-price')
-                    || item.querySelector('.product-line-info'));
+                    || item.querySelector('.product-line-info, .jco-item__t'));
             }
         });
 
@@ -251,9 +254,23 @@
         }
     }
 
+    // Checkouts que repintan el resumen con su propio AJAX sin avisar: se vuelve a
+    // poner la etiqueta cuando cambia la página (no hace peticiones, es idempotente).
+    function observe() {
+        if (!window.MutationObserver || !document.body) {
+            return;
+        }
+        var timer = null;
+        new MutationObserver(function () {
+            clearTimeout(timer);
+            timer = setTimeout(decorate, 150);
+        }).observe(document.body, { childList: true, subtree: true });
+    }
+
     ready(function () {
         decorate();
         toast(cfg.notice);
         bind();
+        observe();
     });
 }());

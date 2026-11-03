@@ -33,6 +33,8 @@ regalos que ya haya en carritos abiertos (no se pasan a cobrar).
 - Ajustes globales de IVA/envío que no se usaban: eliminados (van en cada regla).
 
 ### Nuevo
+- Compatible con checkouts de módulos (josracheckout 1.2.1+): etiqueta por el hook nativo de la línea,
+  repintado tras su AJAX y avisos que ya no se pierden en sus peticiones.
 - Columna **Estado** en la lista de reglas y avisos al editar: dice por qué una regla no daría regalo
   (stock insuficiente para las unidades a regalar, producto desactivado, caducada, sin unidades, combinación...).
 - Con el modo depuración, el log explica regla a regla por qué no se aplica (grupo, zona, umbral, stock).
