@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <module>
     <name>josra_giftproduct</name>
-    <displayName><![CDATA[Gift Product - josra]]></displayName>
-    <version><![CDATA[1.0.0]]></version>
-    <description><![CDATA[Añade automáticamente un producto de regalo al carrito según reglas configurables de importe o cantidad. Compatible con PrestaShop 1.6, 1.7, 8.x y 9.x.]]></description>
+    <displayName><![CDATA[Producto de regalo automático]]></displayName>
+    <version><![CDATA[2.0.0]]></version>
+    <description><![CDATA[Mete solo un producto de regalo en el carrito según importe, cantidad o producto comprado, a precio cero y con etiqueta de regalo.]]></description>
     <author><![CDATA[josra]]></author>
     <tab><![CDATA[pricing_promotion]]></tab>
     <is_configurable>1</is_configurable>
-    <need_instance>1</need_instance>
+    <need_instance>0</need_instance>
     <limited_countries></limited_countries>
 </module>

@@ -567,30 +567,33 @@ class JosraGiftManager
                 $sp = null;
             }
         }
-        if ($sp && abs((float)$sp->reduction - $reduction) < 0.0000001) {
+        if ($sp && $sp->reduction_type === 'percentage' && (float)$sp->price < 0
+            && abs((float)$sp->reduction - $reduction) < 0.0000001) {
             return;
         }
         if (!$sp) {
             // Por si quedó uno huérfano del mismo carrito y producto.
             $this->deleteOwnLeftovers($cart, $state);
             $sp = new SpecificPrice();
-            $sp->id_product = (int)$state['id_product'];
-            $sp->id_product_attribute = (int)$state['id_product_attribute'];
-            $sp->id_cart = (int)$cart->id;
-            $sp->id_shop = (int)$cart->id_shop;
-            $sp->id_shop_group = 0;
-            $sp->id_currency = 0;
-            $sp->id_country = 0;
-            $sp->id_group = 0;
-            $sp->id_customer = 0;
-            $sp->id_specific_price_rule = 0;
-            $sp->price = -1;
-            $sp->from_quantity = 1;
-            $sp->reduction_type = 'percentage';
-            $sp->reduction_tax = 1;
-            $sp->from = '0000-00-00 00:00:00';
-            $sp->to = '0000-00-00 00:00:00';
         }
+        // Se fijan siempre todos los campos: así también se corrigen los
+        // precios de versiones anteriores del módulo que se adoptan al actualizar.
+        $sp->id_product = (int)$state['id_product'];
+        $sp->id_product_attribute = (int)$state['id_product_attribute'];
+        $sp->id_cart = (int)$cart->id;
+        $sp->id_shop = (int)$cart->id_shop;
+        $sp->id_shop_group = 0;
+        $sp->id_currency = 0;
+        $sp->id_country = 0;
+        $sp->id_group = 0;
+        $sp->id_customer = 0;
+        $sp->id_specific_price_rule = 0;
+        $sp->price = -1;
+        $sp->from_quantity = 1;
+        $sp->reduction_type = 'percentage';
+        $sp->reduction_tax = 1;
+        $sp->from = '0000-00-00 00:00:00';
+        $sp->to = '0000-00-00 00:00:00';
         $sp->reduction = $reduction;
         $ok = $sp->id ? $sp->update() : $sp->add();
         $state['id_specific_price'] = $ok ? (int)$sp->id : 0;
