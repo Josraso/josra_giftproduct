@@ -31,7 +31,7 @@ class Josra_giftproduct extends Module
     {
         $this->name = 'josra_giftproduct';
         $this->tab = 'pricing_promotion';
-        $this->version = '2.0.1';
+        $this->version = '2.0.2';
         $this->author = 'josra';
         $this->need_instance = 0;
         $this->bootstrap = true;

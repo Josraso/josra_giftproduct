@@ -1,5 +1,8 @@
 # Changelog — josra_giftproduct
 
+## 2.0.2
+- La licencia la decide el panel del servidor de actualizaciones: si se exige y la tienda no la tiene, el módulo se desactiva solo; al tenerla, o al dejar de exigirse, vuelve a activarse.
+
 ## 2.0.1
 
 - Conectado al servidor de actualizaciones de josra: las versiones nuevas se instalan desde la configuración del módulo (y en PS 8.1+ desde el gestor de módulos).
