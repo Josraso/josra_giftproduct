@@ -1,5 +1,9 @@
 # Changelog — josra_giftproduct
 
+## 2.0.1
+
+- Conectado al servidor de actualizaciones de josra: las versiones nuevas se instalan desde la configuración del módulo (y en PS 8.1+ desde el gestor de módulos).
+
 ## 2.0.0 — 2026-11-03
 
 Reescritura de la base. Al actualizar desde 1.x se migran reglas, tramos y los

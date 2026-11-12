@@ -2,7 +2,7 @@
 <module>
     <name>josra_giftproduct</name>
     <displayName><![CDATA[Producto de regalo automático]]></displayName>
-    <version><![CDATA[2.0.0]]></version>
+    <version><![CDATA[2.0.1]]></version>
     <description><![CDATA[Mete solo un producto de regalo en el carrito según importe, cantidad o producto comprado, a precio cero y con etiqueta de regalo.]]></description>
     <author><![CDATA[josra]]></author>
     <tab><![CDATA[pricing_promotion]]></tab>

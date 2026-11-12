@@ -20,6 +20,7 @@ require_once dirname(__FILE__) . '/classes/JosraGiftCart.php';
 require_once dirname(__FILE__) . '/classes/JosraGiftOrderLog.php';
 require_once dirname(__FILE__) . '/classes/JosraGiftManager.php';
 require_once dirname(__FILE__) . '/classes/JosraGiftAdmin.php';
+require_once dirname(__FILE__) . '/classes/Josra_giftproductUpdater.php';
 
 class Josra_giftproduct extends Module
 {
@@ -30,7 +31,7 @@ class Josra_giftproduct extends Module
     {
         $this->name = 'josra_giftproduct';
         $this->tab = 'pricing_promotion';
-        $this->version = '2.0.0';
+        $this->version = '2.0.1';
         $this->author = 'josra';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -61,6 +62,23 @@ class Josra_giftproduct extends Module
         return version_compare(_PS_VERSION_, '1.7.7.0', '>=');
     }
 
+    public function getUpdater()
+    {
+        return new Josra_giftproductUpdater($this);
+    }
+
+    /** Aviso periódico al servidor de actualizaciones (solo en el back-office) */
+    public function hookActionAdminControllerSetMedia($params)
+    {
+        $this->getUpdater()->maybePing();
+    }
+
+    /** PS 8.1+: la versión nueva aparece en Gestor de módulos > Actualizaciones */
+    public function hookActionListModules($params)
+    {
+        return $this->getUpdater()->getNativeModuleList();
+    }
+
     // =========================================================================
     // INSTALACIÓN
     // =========================================================================
@@ -70,11 +88,18 @@ class Josra_giftproduct extends Module
         return parent::install()
             && $this->installDb()
             && $this->registerHooks()
+            && $this->getUpdater()->registerHooks()
             && $this->installConfig();
     }
 
     public function uninstall()
     {
+        $this->getUpdater()->notifyUninstall();
+        Configuration::deleteByName('JOSRA_GIFTPRODUCT_UPD_TS');
+        Configuration::deleteByName('JOSRA_GIFTPRODUCT_UPD_INFO');
+        Configuration::deleteByName('JOSRA_GIFTPRODUCT_UPD_SU');
+        Configuration::deleteByName('JOSRA_GIFTPRODUCT_UPD_LT');
+
         // Primero los precios a cero de los carritos abiertos: si no, seguirían gratis.
         JosraGiftCart::deleteAllSpecificPrices();
         foreach (array('josra_gift_rule', 'josra_gift_rule_level', 'josra_gift_rule_restriction',
@@ -178,8 +203,20 @@ class Josra_giftproduct extends Module
 
     public function getContent()
     {
+        // Servidor de actualizaciones: botones del panel, hooks y upgrades pendientes
+        $updater = $this->getUpdater();
+        $output = $updater->processRequest();
+
         $admin = new JosraGiftAdmin($this);
-        return $admin->getContent();
+        $forms = $admin->getContent();
+
+        // Panel de actualizaciones: arriba si hay versión nueva, abajo si no
+        $info = $updater->getInfo();
+        $panel = $updater->renderPanel();
+
+        return !empty($info['update_available'])
+            ? $output . $panel . $forms
+            : $output . $forms . $panel;
     }
 
     public function fetchTemplate($name)
