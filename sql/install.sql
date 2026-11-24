@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS `PREFIX_josra_gift_rule` (
     `max_uses`            INT(10) UNSIGNED NOT NULL DEFAULT 0,
     `uses_count`          INT(10) UNSIGNED NOT NULL DEFAULT 0,
     `priority`            INT(10) UNSIGNED NOT NULL DEFAULT 0,
+    `choice_mode`         VARCHAR(16)      NOT NULL DEFAULT 'one',
+    `choice_lower`        TINYINT(1)       NOT NULL DEFAULT 1,
+    `after_discounts`     TINYINT(1)       NOT NULL DEFAULT 0,
     `date_add`            DATETIME         NOT NULL,
     `date_upd`            DATETIME         NOT NULL,
     PRIMARY KEY (`id_josra_gift_rule`)
@@ -28,6 +31,7 @@ CREATE TABLE IF NOT EXISTS `PREFIX_josra_gift_rule_level` (
     `id_product`               INT(10) UNSIGNED NOT NULL DEFAULT 0,
     `id_product_attribute`     INT(10) UNSIGNED NOT NULL DEFAULT 0,
     `gift_qty`                 INT(10) UNSIGNED NOT NULL DEFAULT 1,
+    `allowed_attributes`       VARCHAR(2000)    NOT NULL DEFAULT '',
     `sort_order`               INT(10) UNSIGNED NOT NULL DEFAULT 0,
     PRIMARY KEY (`id_josra_gift_rule_level`),
     KEY `idx_rule` (`id_josra_gift_rule`)
@@ -76,4 +80,18 @@ CREATE TABLE IF NOT EXISTS `PREFIX_josra_gift_order_log` (
     KEY `idx_order` (`id_order`),
     KEY `idx_rule` (`id_josra_gift_rule`),
     KEY `idx_product` (`id_product`)
+) ENGINE=ENGINE_TYPE DEFAULT CHARSET=utf8mb4;
+
+-- Regalos elegidos por el cliente (reglas «el cliente elige»): uno por hueco (pedido o tramo)
+CREATE TABLE IF NOT EXISTS `PREFIX_josra_gift_choice` (
+    `id_cart`                  INT(10) UNSIGNED NOT NULL,
+    `slot`                     VARCHAR(32)      NOT NULL,
+    `id_josra_gift_rule`       INT(10) UNSIGNED NOT NULL DEFAULT 0,
+    `id_josra_gift_rule_level` INT(10) UNSIGNED NOT NULL DEFAULT 0,
+    `id_product`               INT(10) UNSIGNED NOT NULL DEFAULT 0,
+    `id_product_attribute`     INT(10) UNSIGNED NOT NULL DEFAULT 0,
+    `gift_qty`                 INT(10) UNSIGNED NOT NULL DEFAULT 1,
+    `id_specific_price`        INT(10) UNSIGNED NOT NULL DEFAULT 0,
+    `date_upd`                 DATETIME         NOT NULL,
+    PRIMARY KEY (`id_cart`, `slot`)
 ) ENGINE=ENGINE_TYPE DEFAULT CHARSET=utf8mb4;

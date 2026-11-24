@@ -20,15 +20,33 @@ class Josra_giftproductAjaxModuleFrontController extends ModuleFrontController
         $cart = $this->context->cart;
         $hasCart = is_object($cart) && Validate::isLoadedObject($cart);
 
-        if ($hasCart && Tools::getValue('josra_action') === 'restore') {
+        $action = (string)Tools::getValue('josra_action');
+        if ($hasCart && $action === 'restore') {
             $this->module->getManager()->restore($cart);
+        }
+
+        // «Elige tu regalo»: elegir, cambiar de combinación o quitar
+        $error = '';
+        if ($hasCart && ($action === 'choose' || $action === 'unchoose') && JosraGiftChoice::ensureSchema()) {
+            $choice = $this->module->getChoice();
+            $slot = preg_replace('/[^a-z0-9.]/', '', (string)Tools::getValue('slot'));
+            $r = $action === 'choose'
+                ? $choice->choose($cart, $slot, (int)Tools::getValue('id_level'), (int)Tools::getValue('id_attr'))
+                : $choice->remove($cart, $slot);
+            if ($r !== true) {
+                $error = (string)$r;
+            }
         }
 
         $notice = $hasCart ? JosraGiftCart::popNotice($cart->id) : null;
         $this->json(array(
+            'ok' => $error === '',
+            'error' => $error,
             'gift' => $hasCart ? $this->module->getGiftLine($cart) : null,
+            'gifts' => $hasCart ? $this->module->getGiftLines($cart) : array(),
             'notice' => $notice ? $this->module->noticeText($notice) : '',
             'block' => $this->module->renderCartBlock($hasCart ? $cart : null),
+            'choice' => $this->module->renderChoiceBlock($hasCart ? $cart : null, Tools::getValue('where') === 'checkout' ? 'checkout' : 'cart'),
         ));
     }
 

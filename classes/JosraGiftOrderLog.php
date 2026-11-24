@@ -50,6 +50,14 @@ class JosraGiftOrderLog extends ObjectModel
         return $row ? $row : null;
     }
 
+    /** Todos los regalos del pedido (automático y los que eligió el cliente) */
+    public static function getAllByOrderId($idOrder)
+    {
+        return (array)Db::getInstance()->executeS(
+            'SELECT * FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` WHERE `id_order` = ' . (int)$idOrder . ' ORDER BY `id_josra_gift_order_log` ASC'
+        );
+    }
+
     public static function setStatus($idLog, $status)
     {
         return Db::getInstance()->update(

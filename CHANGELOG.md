@@ -1,5 +1,20 @@
 # Changelog — josra_giftproduct
 
+## 2.1.0 — 2026-11-24
+- Nuevo tipo de regla «Importe del carrito: el cliente elige el regalo». Los tramos se hacen poniendo el mismo «Desde» en varias filas: cada fila es un regalo que se puede elegir en ese tramo.
+- En cada regalo con combinaciones marcas cuáles puede elegir el cliente (ninguna = todas). Solo salen las que tienen stock.
+- Opciones de la regla:
+  - un regalo por pedido o uno por cada tramo alcanzado;
+  - si puede elegir también los regalos de los tramos de abajo;
+  - restar o no los cupones y descuentos del importe (también para las reglas por importe de siempre).
+- En el carrito (y en el resumen de josracheckout 1.7.0) sale el bloque «Elige tu regalo», pensado primero para el móvil:
+  - tarjetas pequeñas que se deslizan con el dedo;
+  - la elegida marcada, con un desplegable para la combinación;
+  - el siguiente tramo en gris con candado y barra de progreso: «Añade X € más y podrás elegir uno de estos».
+- Si el carrito baja de tramo o el regalo se agota, se quita solo y se avisa. Si el cliente borra la línea del regalo, puede volver a elegir.
+- Los regalos elegidos llevan la etiqueta REGALO en el carrito y en el pedido, cuentan en las estadísticas y en «Regalos disponibles» (por pedidos), y la ficha del pedido muestra todos los regalos del pedido.
+- Restricciones por grupos, zonas, fechas y prioridad, como en el resto de reglas.
+
 ## 2.0.3
 - Licencia: el cartel con el botón «Ya tengo la licencia» sale desde la primera vez que se abre la configuración, y el aviso del back-office explica dónde pulsar.
 

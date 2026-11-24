@@ -13,6 +13,7 @@ class JosraGiftRule extends ObjectModel
     const TRIGGER_AMOUNT = 'amount';
     const TRIGGER_QUANTITY = 'quantity';
     const TRIGGER_PRODUCT = 'product';
+    const TRIGGER_CHOICE = 'choice';
 
     public $id_josra_gift_rule;
     public $name;
@@ -27,6 +28,9 @@ class JosraGiftRule extends ObjectModel
     public $max_uses = 0;
     public $uses_count = 0;
     public $priority = 0;
+    public $choice_mode = 'one';
+    public $choice_lower = 1;
+    public $after_discounts = 0;
     public $date_add;
     public $date_upd;
 
@@ -46,6 +50,9 @@ class JosraGiftRule extends ObjectModel
             'max_uses' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'),
             'uses_count' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'),
             'priority' => array('type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'),
+            'choice_mode' => array('type' => self::TYPE_STRING, 'validate' => 'isGenericName', 'size' => 16),
+            'choice_lower' => array('type' => self::TYPE_BOOL, 'validate' => 'isBool'),
+            'after_discounts' => array('type' => self::TYPE_BOOL, 'validate' => 'isBool'),
             'date_add' => array('type' => self::TYPE_DATE, 'validate' => 'isDate'),
             'date_upd' => array('type' => self::TYPE_DATE, 'validate' => 'isDate'),
         ),
@@ -138,9 +145,25 @@ class JosraGiftRule extends ObjectModel
             $row['combination_name'] = $row['id_product_attribute']
                 ? self::getCombinationName((int)$row['id_product_attribute'], $idLang)
                 : '';
+            $row['allowed'] = self::parseIds(isset($row['allowed_attributes']) ? $row['allowed_attributes'] : '');
             $levels[] = $row;
         }
         return $levels;
+    }
+
+    /** Lista de ids (texto «1,2,3» o array) sin repetidos ni ceros */
+    public static function parseIds($value)
+    {
+        if (!is_array($value)) {
+            $value = explode(',', (string)$value);
+        }
+        $out = array();
+        foreach ($value as $v) {
+            if ((int)$v > 0) {
+                $out[(int)$v] = (int)$v;
+            }
+        }
+        return array_values($out);
     }
 
     public static function getRestrictions($idRule)
@@ -169,6 +192,7 @@ class JosraGiftRule extends ObjectModel
                 'id_product' => (int)$level['id_product'],
                 'id_product_attribute' => (int)$level['id_product_attribute'],
                 'gift_qty' => max(1, (int)$level['gift_qty']),
+                'allowed_attributes' => pSQL(implode(',', isset($level['allowed']) ? self::parseIds($level['allowed']) : array())),
                 'sort_order' => $pos++,
             ));
         }

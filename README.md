@@ -10,6 +10,8 @@ Mete solo en el carrito un producto de regalo, a **precio cero** y con una etiqu
   50 € → regalo A, 100 € → regalo B. Solo se da el del tramo más alto.
 - **Por número de productos** con tramos.
 - **Por producto concreto** en el carrito (p. ej. compra 2 y llévate 1).
+- **El cliente elige el regalo** por tramos de importe: varios regalos por tramo, combinación a elegir,
+  uno por pedido o uno por tramo, con o sin los regalos de los tramos de abajo.
 - Combinación concreta del regalo y unidades a regalar por tramo.
 - Fechas, unidades de regalo disponibles, prioridad, grupos de clientes y zonas.
 - Si un regalo se agota se da el del tramo anterior y se avisa.

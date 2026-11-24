@@ -19,6 +19,7 @@ require_once dirname(__FILE__) . '/classes/JosraGiftRule.php';
 require_once dirname(__FILE__) . '/classes/JosraGiftCart.php';
 require_once dirname(__FILE__) . '/classes/JosraGiftOrderLog.php';
 require_once dirname(__FILE__) . '/classes/JosraGiftManager.php';
+require_once dirname(__FILE__) . '/classes/JosraGiftChoice.php';
 require_once dirname(__FILE__) . '/classes/JosraGiftAdmin.php';
 require_once dirname(__FILE__) . '/classes/Josra_giftproductUpdater.php';
 
@@ -31,7 +32,7 @@ class Josra_giftproduct extends Module
     {
         $this->name = 'josra_giftproduct';
         $this->tab = 'pricing_promotion';
-        $this->version = '2.0.3';
+        $this->version = '2.1.0';
         $this->author = 'josra';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -40,7 +41,7 @@ class Josra_giftproduct extends Module
         parent::__construct();
 
         $this->displayName = $this->l('Producto de regalo automático');
-        $this->description = $this->l('Mete solo un producto de regalo en el carrito según importe, cantidad o producto comprado, a precio cero y con etiqueta de regalo.');
+        $this->description = $this->l('Regalos a precio cero según importe, cantidad o producto comprado: automáticos o a elegir por el cliente por tramos de importe.');
         $this->confirmUninstall = $this->l('Se borrarán las reglas y las estadísticas de regalos. ¿Seguro?');
     }
 
@@ -89,7 +90,8 @@ class Josra_giftproduct extends Module
             && $this->installDb()
             && $this->registerHooks()
             && $this->getUpdater()->registerHooks()
-            && $this->installConfig();
+            && $this->installConfig()
+            && Configuration::updateGlobalValue('JOSRA_GIFT_SCHEMA', JosraGiftChoice::SCHEMA);
     }
 
     public function uninstall()
@@ -102,14 +104,15 @@ class Josra_giftproduct extends Module
 
         // Primero los precios a cero de los carritos abiertos: si no, seguirían gratis.
         JosraGiftCart::deleteAllSpecificPrices();
+        JosraGiftChoice::deleteAllSpecificPrices();
         foreach (array('josra_gift_rule', 'josra_gift_rule_level', 'josra_gift_rule_restriction',
-            'josra_gift_cart', 'josra_gift_order_log', 'josra_gift_rule_product') as $table) {
+            'josra_gift_cart', 'josra_gift_order_log', 'josra_gift_rule_product', 'josra_gift_choice') as $table) {
             Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . $table . '`');
         }
         foreach (JosraGiftAdmin::configKeys() as $key) {
             Configuration::deleteByName($key);
         }
-        foreach (array('JOSRA_GIFT_CALC_MODE', 'JOSRA_GIFT_INCLUDE_SHIPPING') as $key) {
+        foreach (array('JOSRA_GIFT_CALC_MODE', 'JOSRA_GIFT_INCLUDE_SHIPPING', 'JOSRA_GIFT_SCHEMA') as $key) {
             Configuration::deleteByName($key);
         }
         return parent::uninstall();
@@ -206,6 +209,8 @@ class Josra_giftproduct extends Module
         // Servidor de actualizaciones: botones del panel, hooks y upgrades pendientes
         $updater = $this->getUpdater();
         $output = $updater->processRequest();
+        // tablas de la 2.1 aunque se haya actualizado subiendo los archivos
+        JosraGiftChoice::ensureSchema();
 
         $admin = new JosraGiftAdmin($this);
         $forms = $admin->getContent();
@@ -309,6 +314,38 @@ class Josra_giftproduct extends Module
             'line_qty' => $lineQty,
             'label' => $free < $lineQty ? $free . ' x ' . $this->getBadgeText() : $this->getBadgeText(),
         );
+    }
+
+    /**
+     * Líneas de regalo del carrito para la etiqueta: el automático y los que ha elegido el cliente.
+     */
+    public function getGiftLines($cart)
+    {
+        $out = array();
+        $auto = $this->getGiftLine($cart);
+        if ($auto) {
+            $out[] = $auto;
+        }
+        if (!Validate::isLoadedObject($cart) || !JosraGiftChoice::ensureSchema()) {
+            return $out;
+        }
+        $products = $cart->getProducts();
+        foreach (JosraGiftChoice::rows($cart->id) as $row) {
+            $lineQty = $this->getManager()->lineQty($products, $row['id_product'], $row['id_product_attribute']);
+            if (!$lineQty) {
+                continue;
+            }
+            $free = min($row['gift_qty'], $lineQty);
+            $out[] = array(
+                'id_product' => $row['id_product'],
+                'id_product_attribute' => $row['id_product_attribute'],
+                'name' => JosraGiftRule::getProductName($row['id_product']),
+                'free' => $free,
+                'line_qty' => $lineQty,
+                'label' => $free < $lineQty ? $free . ' x ' . $this->getBadgeText() : $this->getBadgeText(),
+            );
+        }
+        return $out;
     }
 
     /**
@@ -423,6 +460,7 @@ class Josra_giftproduct extends Module
         $cart = $this->context->cart;
         $hasCart = is_object($cart) && Validate::isLoadedObject($cart);
 
+        JosraGiftChoice::ensureSchema();
         // Red de seguridad en carrito y checkout: reglas caducadas, stock, etc.
         if ($hasCart && $this->isCartPage()) {
             $this->getManager()->sync($cart);
@@ -441,6 +479,7 @@ class Josra_giftproduct extends Module
             'ajaxUrl' => $this->context->link->getModuleLink($this->name, 'ajax', array(), true),
             'ps17' => self::isPs17(),
             'gift' => $hasCart ? $this->getGiftLine($cart) : null,
+            'gifts' => $hasCart ? $this->getGiftLines($cart) : array(),
             'notice' => $notice ? $this->noticeText($notice) : '',
             'bg' => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
             'fg' => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
@@ -464,7 +503,33 @@ class Josra_giftproduct extends Module
 
     public function hookDisplayShoppingCartFooter($params)
     {
-        return $this->renderCartBlock($this->context->cart);
+        return $this->renderCartBlock($this->context->cart) . $this->renderChoiceBlock($this->context->cart, 'cart');
+    }
+
+    public function getChoice()
+    {
+        return new JosraGiftChoice($this->getManager(), $this->context);
+    }
+
+    /**
+     * Bloque «Elige tu regalo» (reglas «el cliente elige»): en el carrito y en el resumen de josracheckout.
+     * Vacío si no hay ninguna regla que valga para este carrito.
+     *
+     * @param string $where cart|checkout
+     */
+    public function renderChoiceBlock($cart, $where = 'cart')
+    {
+        if (!JosraGiftChoice::ensureSchema()) {
+            return '';
+        }
+        $view = $this->getChoice()->view($cart);
+        $this->context->smarty->assign(array(
+            'jgc' => $view,
+            'jgc_where' => $where === 'checkout' ? 'checkout' : 'cart',
+            'jgc_bg' => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
+            'jgc_fg' => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),
+        ));
+        return $this->display(__FILE__, 'views/templates/hook/choice_block.tpl');
     }
 
     /** Etiqueta en la línea del carrito (1.7, 8, 9). */
@@ -482,8 +547,13 @@ class Josra_giftproduct extends Module
             $idProduct = isset($product['id_product']) ? (int)$product['id_product'] : 0;
             $idAttr = isset($product['id_product_attribute']) ? (int)$product['id_product_attribute'] : 0;
         }
-        $line = $this->getGiftLine($this->context->cart);
-        if (!$line || $line['id_product'] !== $idProduct || $line['id_product_attribute'] !== $idAttr) {
+        $line = null;
+        foreach ($this->getGiftLines($this->context->cart) as $l) {
+            if ($l['id_product'] === $idProduct && $l['id_product_attribute'] === $idAttr) {
+                $line = $l;
+            }
+        }
+        if (!$line) {
             return '';
         }
         $this->context->smarty->assign(array(
@@ -504,6 +574,9 @@ class Josra_giftproduct extends Module
             return;
         }
         $this->getManager()->onOrderValidated($params['order'], $params['cart']);
+        if (Validate::isLoadedObject($params['order']) && JosraGiftChoice::ensureSchema()) {
+            $this->getChoice()->onOrderValidated($params['order'], $params['cart']);
+        }
     }
 
     public function hookActionOrderStatusPostUpdate($params)
@@ -532,17 +605,20 @@ class Josra_giftproduct extends Module
 
     protected function renderOrderPanel($idOrder, $card)
     {
-        $log = $idOrder ? JosraGiftOrderLog::getByOrderId($idOrder) : null;
-        if (!$log) {
+        $logs = $idOrder ? JosraGiftOrderLog::getAllByOrderId($idOrder) : array();
+        if (!$logs) {
             return '';
         }
         $order = new Order($idOrder);
         $currency = Validate::isLoadedObject($order) ? (int)$order->id_currency : null;
+        foreach ($logs as &$log) {
+            $log['unit_price'] = $this->formatPrice((float)$log['original_price'], $currency);
+            $log['total_price'] = $this->formatPrice((float)$log['original_price'] * (int)$log['gift_qty'], $currency);
+        }
+        unset($log);
         $this->context->smarty->assign(array(
-            'josra_log' => $log,
+            'josra_logs' => $logs,
             'josra_card' => $card,
-            'josra_unit_price' => $this->formatPrice((float)$log['original_price'], $currency),
-            'josra_total_price' => $this->formatPrice((float)$log['original_price'] * (int)$log['gift_qty'], $currency),
             'josra_badge' => $this->getBadgeText(),
             'josra_badge_bg' => Configuration::get('JOSRA_GIFT_BADGE_BG_COLOR'),
             'josra_badge_fg' => Configuration::get('JOSRA_GIFT_BADGE_TEXT_COLOR'),

@@ -65,6 +65,9 @@ class JosraGiftManager
         self::$running[$idCart] = true;
         try {
             $this->doSync($cart);
+            // regalos que elige el cliente (reglas «el cliente elige»)
+            $choice = new JosraGiftChoice($this, $this->context);
+            $choice->sync($cart);
         } catch (Exception $e) {
             self::log('ERROR cart=' . $idCart . ' ' . $e->getMessage());
         }
@@ -215,6 +218,9 @@ class JosraGiftManager
     protected function computeTarget($cart, array $products, array $state, $freeInCart)
     {
         foreach ($this->getApplicableRules($cart) as $rule) {
+            if ($rule['trigger_type'] === JosraGiftRule::TRIGGER_CHOICE) {
+                continue;
+            }
             $levels = array_map(array($this, 'normalizeLevel'), $rule['levels']);
             $reached = -1;
 
@@ -289,7 +295,7 @@ class JosraGiftManager
         }
 
         foreach ($rules as $rule) {
-            if ($rule['trigger_type'] === JosraGiftRule::TRIGGER_PRODUCT) {
+            if ($rule['trigger_type'] === JosraGiftRule::TRIGGER_PRODUCT || $rule['trigger_type'] === JosraGiftRule::TRIGGER_CHOICE) {
                 continue;
             }
             $isQty = $rule['trigger_type'] === JosraGiftRule::TRIGGER_QUANTITY;
@@ -318,7 +324,7 @@ class JosraGiftManager
         return null;
     }
 
-    protected function getApplicableRules($cart)
+    public function getApplicableRules($cart)
     {
         $rules = JosraGiftRule::getActiveRules();
         if (empty($rules)) {
@@ -378,15 +384,34 @@ class JosraGiftManager
     /**
      * Importe del carrito en la moneda por defecto (los umbrales se guardan así).
      */
-    protected function cartValue($cart, array $rule)
+    public function cartValue($cart, array $rule)
     {
         $withTax = $rule['calc_mode'] === 'with_tax';
         // Sin caché: el carrito puede haber cambiado en esta misma petición.
         $value = (float)$cart->getOrderTotal($withTax, Cart::ONLY_PRODUCTS, null, null, false);
+        if (!empty($rule['after_discounts'])) {
+            // descuentos y cupones del carrito (sin los de transporte gratis)
+            $value -= (float)$cart->getOrderTotal($withTax, Cart::ONLY_DISCOUNTS, null, null, false)
+                - (float)$this->freeShippingDiscount($cart, $withTax);
+            $value = max(0, $value);
+        }
         if ((int)$rule['include_shipping']) {
             $value += (float)$cart->getOrderTotal($withTax, Cart::ONLY_SHIPPING, null, null, false);
         }
         return $this->toDefaultCurrency($value, (int)$cart->id_currency);
+    }
+
+    /** Parte de los descuentos que es el transporte gratis (no resta del importe de los productos) */
+    protected function freeShippingDiscount($cart, $withTax)
+    {
+        $total = 0.0;
+        foreach ((array)$cart->getCartRules() as $r) {
+            if (!empty($r['free_shipping'])) {
+                $total += (float)$cart->getOrderTotal($withTax, Cart::ONLY_SHIPPING, null, null, false);
+                break;
+            }
+        }
+        return $total;
     }
 
     protected function toDefaultCurrency($value, $idCurrency)
@@ -415,7 +440,7 @@ class JosraGiftManager
         return $value * (float)$currency->conversion_rate;
     }
 
-    protected function lineQty(array $products, $idProduct, $idAttr)
+    public function lineQty(array $products, $idProduct, $idAttr)
     {
         $qty = 0;
         foreach ($products as $p) {
@@ -434,6 +459,12 @@ class JosraGiftManager
         $total = 0;
         foreach ($products as $p) {
             $total += (int)$p['cart_quantity'];
+        }
+        // los regalos que ha elegido el cliente tampoco cuentan
+        if (!empty($state['id_cart'])) {
+            foreach (JosraGiftChoice::rows((int)$state['id_cart']) as $row) {
+                $total -= (int)$row['gift_qty'];
+            }
         }
         return max(0, $total - (int)$freeInCart);
     }
@@ -580,7 +611,7 @@ class JosraGiftManager
     // CARRITO Y PRECIO
     // =========================================================================
 
-    protected function updateQty($cart, $idProduct, $idAttr, $qty, $op)
+    public function updateQty($cart, $idProduct, $idAttr, $qty, $op)
     {
         if ($qty <= 0) {
             return true;
@@ -610,7 +641,7 @@ class JosraGiftManager
      * para que las unidades de regalo salgan gratis y el resto se cobre.
      * En porcentaje no depende del IVA ni de la dirección del cliente.
      */
-    protected function applyPrice($cart, array &$state)
+    public function applyPrice($cart, array &$state)
     {
         $products = $cart->getProducts(true);
         $lineQty = $this->lineQty($products, $state['id_product'], $state['id_product_attribute']);
@@ -721,6 +752,11 @@ class JosraGiftManager
         if (!$state || !$state['in_cart'] || !$state['id_product']) {
             return;
         }
+        $this->logAutoGift($order, $idCart, $state);
+    }
+
+    protected function logAutoGift($order, $idCart, array $state)
+    {
         $detail = Db::getInstance()->getRow(
             'SELECT `id_order_detail`, `product_name`, `product_quantity`, `original_product_price`
              FROM `' . _DB_PREFIX_ . 'order_detail`
@@ -731,7 +767,8 @@ class JosraGiftManager
         if (!$detail) {
             return;
         }
-        if (JosraGiftOrderLog::getByOrderId((int)$order->id)) {
+        if (Db::getInstance()->getValue('SELECT 1 FROM `' . _DB_PREFIX_ . 'josra_gift_order_log` WHERE `id_order` = ' . (int)$order->id
+            . ' AND `id_product` = ' . (int)$state['id_product'] . ' AND `id_product_attribute` = ' . (int)$state['id_product_attribute'])) {
             return;
         }
         $free = min((int)$state['gift_qty'], (int)$detail['product_quantity']);
@@ -779,8 +816,8 @@ class JosraGiftManager
      */
     public function onOrderStatusChanged($idOrder, $idNewState)
     {
-        $log = JosraGiftOrderLog::getByOrderId((int)$idOrder);
-        if (!$log) {
+        $logs = JosraGiftOrderLog::getAllByOrderId((int)$idOrder);
+        if (!$logs) {
             return;
         }
         $cancelStates = array_filter(array(
@@ -789,12 +826,23 @@ class JosraGiftManager
             (int)Configuration::get('PS_OS_ERROR'),
         ));
         $isCancel = in_array((int)$idNewState, $cancelStates);
-        if ($isCancel && $log['status'] === 'valid') {
-            JosraGiftRule::addUses((int)$log['id_josra_gift_rule'], -1);
-            JosraGiftOrderLog::setStatus((int)$log['id_josra_gift_order_log'], 'cancelled');
-        } elseif (!$isCancel && $log['status'] === 'cancelled') {
-            JosraGiftRule::addUses((int)$log['id_josra_gift_rule'], 1);
-            JosraGiftOrderLog::setStatus((int)$log['id_josra_gift_order_log'], 'valid');
+        // «Regalos disponibles» va por pedidos: una vez por regla aunque el pedido lleve varios regalos de ella
+        $done = array();
+        foreach ($logs as $log) {
+            $idRule = (int)$log['id_josra_gift_rule'];
+            if ($isCancel && $log['status'] === 'valid') {
+                if (!isset($done[$idRule])) {
+                    JosraGiftRule::addUses($idRule, -1);
+                }
+                JosraGiftOrderLog::setStatus((int)$log['id_josra_gift_order_log'], 'cancelled');
+                $done[$idRule] = true;
+            } elseif (!$isCancel && $log['status'] === 'cancelled') {
+                if (!isset($done[$idRule])) {
+                    JosraGiftRule::addUses($idRule, 1);
+                }
+                JosraGiftOrderLog::setStatus((int)$log['id_josra_gift_order_log'], 'valid');
+                $done[$idRule] = true;
+            }
         }
     }
 }

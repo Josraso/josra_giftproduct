@@ -45,12 +45,19 @@
         return span;
     }
 
-    function addBadgeTo(container, target) {
-        if (!container || !target || !cfg.gift || container.querySelector('.josra-gift-badge')) {
+    function addBadgeTo(container, target, gift) {
+        if (!container || !target || !gift || container.querySelector('.josra-gift-badge')) {
             return;
         }
         target.appendChild(document.createTextNode(' '));
-        target.appendChild(makeBadge(cfg.gift.label));
+        target.appendChild(makeBadge(gift.label));
+    }
+
+    function giftList() {
+        if (cfg.gifts && cfg.gifts.length) {
+            return cfg.gifts;
+        }
+        return cfg.gift ? [cfg.gift] : [];
     }
 
     // -------------------------------------------------------------------------
@@ -68,11 +75,12 @@
             }
         });
 
-        if (!cfg.gift) {
-            return;
-        }
-        var pid = String(cfg.gift.id_product);
-        var aid = String(cfg.gift.id_product_attribute);
+        giftList().forEach(decorateOne);
+    }
+
+    function decorateOne(gift) {
+        var pid = String(gift.id_product);
+        var aid = String(gift.id_product_attribute);
 
         // Línea del carrito por sus atributos data-* (carrito 1.7+, josracheckout y checkouts parecidos).
         var links = document.querySelectorAll('[data-id-product="' + pid + '"][data-id-product-attribute="' + aid + '"]');
@@ -83,24 +91,24 @@
             var item = closest(el, '.cart-item, .product-line-grid, .jco-item');
             if (item) {
                 addBadgeTo(item, item.querySelector('.product-line-info.product-price, .product-price, .current-price')
-                    || item.querySelector('.product-line-info, .jco-item__t'));
+                    || item.querySelector('.product-line-info, .jco-item__t'), gift);
             }
         });
 
         // 1.6: filas del resumen del carrito (id="product_ID_ATTR_...").
         var rows = document.querySelectorAll('tr[id^="product_' + pid + '_' + aid + '_"]');
         Array.prototype.forEach.call(rows, function (row) {
-            addBadgeTo(row, row.querySelector('.cart_description .product-name') || row.querySelector('.cart_description'));
+            addBadgeTo(row, row.querySelector('.cart_description .product-name') || row.querySelector('.cart_description'), gift);
         });
 
         // Resumen lateral del checkout: por nombre.
-        var name = (cfg.gift.name || '').trim().toLowerCase();
+        var name = (gift.name || '').trim().toLowerCase();
         if (name) {
             var lines = document.querySelectorAll('#cart-summary-product-list .media, .cart-summary-products li, #js-checkout-summary .media');
             Array.prototype.forEach.call(lines, function (line) {
                 var nameEl = line.querySelector('.product-name, .media-body a, a');
                 if (nameEl && nameEl.textContent.trim().toLowerCase().indexOf(name) === 0) {
-                    addBadgeTo(line, nameEl.parentNode);
+                    addBadgeTo(line, nameEl.parentNode, gift);
                 }
             });
         }
@@ -163,19 +171,73 @@
         xhr.send(body.join('&'));
     }
 
+    function replaceBlock(id, html) {
+        var block = document.getElementById(id);
+        if (!block || typeof html !== 'string') {
+            return;
+        }
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        var fresh = tmp.querySelector('#' + id);
+        if (fresh) {
+            block.parentNode.replaceChild(fresh, block);
+        }
+    }
+
     function applyStatus(data) {
         cfg.gift = data.gift || null;
-        var block = document.getElementById('josra-gift-block');
-        if (block && typeof data.block === 'string') {
-            var tmp = document.createElement('div');
-            tmp.innerHTML = data.block;
-            var fresh = tmp.querySelector('#josra-gift-block');
-            if (fresh) {
-                block.parentNode.replaceChild(fresh, block);
-            }
+        cfg.gifts = data.gifts || [];
+        replaceBlock('josra-gift-block', data.block);
+        // en josracheckout el bloque «Elige tu regalo» lo pinta el propio checkout
+        var choice = document.getElementById('josra-gift-choice');
+        if (choice && choice.getAttribute('data-where') !== 'checkout') {
+            replaceBlock('josra-gift-choice', data.choice);
         }
         decorate();
         toast(data.notice);
+    }
+
+    function where() {
+        var choice = document.getElementById('josra-gift-choice');
+        return choice ? (choice.getAttribute('data-where') || 'cart') : 'cart';
+    }
+
+    // -------------------------------------------------------------------------
+    // «Elige tu regalo»
+    // -------------------------------------------------------------------------
+
+    function choose(params, box) {
+        if (box) {
+            box.className += ' is-busy';
+        }
+        params.where = where();
+        request(params, function (data) {
+            lastGiftKey = giftKey(data.gift);
+            cfg.gift = data.gift || null;
+            cfg.gifts = data.gifts || [];
+            if (data.error) {
+                toast(data.error);
+            }
+            if (params.where === 'checkout') {
+                // josracheckout vuelve a pintar su resumen (líneas, totales y este bloque)
+                var ev;
+                try {
+                    ev = new CustomEvent('josragift:changed', { bubbles: true });
+                } catch (e) {
+                    ev = document.createEvent('Event');
+                    ev.initEvent('josragift:changed', true, true);
+                }
+                document.dispatchEvent(ev);
+                return;
+            }
+            replaceBlock('josra-gift-choice', data.choice);
+            if (cfg.ps17 && window.prestashop && typeof window.prestashop.emit === 'function'
+                && document.querySelector('.cart-grid, .js-cart')) {
+                window.prestashop.emit('updateCart', { reason: { linkAction: 'refresh' }, resp: {} });
+            } else {
+                window.location.reload();
+            }
+        });
     }
 
     function refresh() {
@@ -183,7 +245,7 @@
             return;
         }
         refreshing = true;
-        request({ josra_action: 'status' }, function (data) {
+        request({ josra_action: 'status', where: where() }, function (data) {
             refreshing = false;
             var changed = giftKey(data.gift) !== lastGiftKey;
             lastGiftKey = giftKey(data.gift);
@@ -228,6 +290,27 @@
             if (btn) {
                 e.preventDefault();
                 restore(btn);
+                return;
+            }
+            var pick = closest(e.target, '[data-jgc-choose]');
+            if (pick) {
+                e.preventDefault();
+                var card = closest(pick, '.jgc__card');
+                if (card && card.className.indexOf('is-busy') !== -1) {
+                    return;
+                }
+                var on = card && card.className.indexOf('is-on') !== -1;
+                choose(on
+                    ? { josra_action: 'unchoose', slot: pick.getAttribute('data-slot') }
+                    : { josra_action: 'choose', slot: pick.getAttribute('data-slot'), id_level: pick.getAttribute('data-level'), id_attr: pick.getAttribute('data-attr') },
+                    card);
+            }
+        });
+        document.addEventListener('change', function (e) {
+            var sel = closest(e.target, '[data-jgc-combo]');
+            if (sel) {
+                choose({ josra_action: 'choose', slot: sel.getAttribute('data-slot'), id_level: sel.getAttribute('data-level'), id_attr: sel.value },
+                    closest(sel, '.jgc__card'));
             }
         });
 

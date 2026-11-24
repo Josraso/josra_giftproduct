@@ -84,6 +84,7 @@ class JosraGiftAdmin
         }
 
         JosraGiftCart::cleanup(30);
+        JosraGiftChoice::cleanup(30);
         $html = $this->flash();
 
         if (Tools::isSubmit('submitJosraGiftConfig')) {
@@ -232,8 +233,14 @@ class JosraGiftAdmin
         foreach ($rows as &$row) {
             $levels = JosraGiftRule::getLevels((int)$row['id_josra_gift_rule'], $idLang);
             $parts = array();
+            $byTier = array();
             foreach ($levels as $lv) {
                 $gift = $this->module->getManager()->giftLabel($lv);
+                if ($row['trigger_type'] === JosraGiftRule::TRIGGER_CHOICE) {
+                    $k = $this->module->formatPrice((float)$lv['trigger_value'], $currency);
+                    $byTier[$k][] = JosraGiftRule::getProductName((int)$lv['id_product'], $idLang);
+                    continue;
+                }
                 if ($row['trigger_type'] === JosraGiftRule::TRIGGER_PRODUCT) {
                     $parts[] = $gift;
                     break;
@@ -243,7 +250,13 @@ class JosraGiftAdmin
                     : $this->module->formatPrice((float)$lv['trigger_value'], $currency);
                 $parts[] = '≥ ' . $threshold . ' → ' . $gift;
             }
+            foreach ($byTier as $k => $names) {
+                $parts[] = '≥ ' . $k . ' → ' . implode(' / ', $names);
+            }
             $type = isset($types[$row['trigger_type']]) ? $types[$row['trigger_type']] : $row['trigger_type'];
+            if ($row['trigger_type'] === JosraGiftRule::TRIGGER_CHOICE) {
+                $type .= ' (' . ($row['choice_mode'] === 'per_level' ? $this->l('uno por tramo') : $this->l('uno por pedido')) . ')';
+            }
             if ($row['trigger_type'] === JosraGiftRule::TRIGGER_PRODUCT && $row['id_trigger_product']) {
                 $type .= ': ' . (int)max(1, $row['trigger_min_qty']) . ' x '
                     . JosraGiftRule::getProductName((int)$row['id_trigger_product'], $idLang);
@@ -329,6 +342,16 @@ class JosraGiftAdmin
             $out[] = $this->l('Sin tramos');
         }
         $manager = $this->module->getManager();
+        if ($rule['trigger_type'] === JosraGiftRule::TRIGGER_CHOICE) {
+            $choice = new JosraGiftChoice($manager, $this->context);
+            foreach ($levels as $lv) {
+                $name = JosraGiftRule::getProductName((int)$lv['id_product']);
+                if (!$choice->options($lv)) {
+                    $out[] = sprintf($this->l('%s: no se puede dar ahora (desactivado o sin stock)'), $name !== '' ? $name : '#' . (int)$lv['id_product']);
+                }
+            }
+            return array_values(array_unique($out));
+        }
         foreach ($levels as $i => $lv) {
             if ($rule['trigger_type'] === JosraGiftRule::TRIGGER_PRODUCT && $i > 0) {
                 break;
@@ -382,6 +405,7 @@ class JosraGiftAdmin
             JosraGiftRule::TRIGGER_AMOUNT => $this->l('Importe del carrito'),
             JosraGiftRule::TRIGGER_QUANTITY => $this->l('Número de productos'),
             JosraGiftRule::TRIGGER_PRODUCT => $this->l('Producto concreto en el carrito'),
+            JosraGiftRule::TRIGGER_CHOICE => $this->l('Importe del carrito: el cliente elige el regalo'),
         );
     }
 
@@ -413,6 +437,9 @@ class JosraGiftAdmin
                 'trigger_min_qty' => Tools::getValue('trigger_min_qty'),
                 'max_uses' => Tools::getValue('max_uses'),
                 'priority' => Tools::getValue('priority'),
+                'choice_mode' => Tools::getValue('choice_mode') === 'per_level' ? 'per_level' : 'one',
+                'choice_lower' => (int)Tools::getValue('choice_lower'),
+                'after_discounts' => (int)Tools::getValue('after_discounts'),
             );
             $dateStart = Tools::getValue('date_start');
             $dateEnd = Tools::getValue('date_end');
@@ -431,6 +458,9 @@ class JosraGiftAdmin
                 'trigger_min_qty' => max(1, (int)$rule->trigger_min_qty),
                 'max_uses' => (int)$rule->max_uses,
                 'priority' => (int)$rule->priority,
+                'choice_mode' => $rule->choice_mode === 'per_level' ? 'per_level' : 'one',
+                'choice_lower' => $isNew ? 1 : (int)$rule->choice_lower,
+                'after_discounts' => (int)$rule->after_discounts,
             );
             $dateStart = $rule->date_start;
             $dateEnd = $rule->date_end;
@@ -444,6 +474,11 @@ class JosraGiftAdmin
         // Combinaciones de cada tramo precargadas (sin esperar al AJAX)
         foreach ($levels as &$lv) {
             $lv['combinations'] = $lv['id_product'] ? $this->getCombinations((int)$lv['id_product'], $idLang) : array();
+            $lv['allowed'] = isset($lv['allowed']) ? JosraGiftRule::parseIds($lv['allowed']) : JosraGiftRule::parseIds(isset($lv['allowed_attributes']) ? $lv['allowed_attributes'] : '');
+            foreach ($lv['combinations'] as &$comb) {
+                $comb['allowed'] = in_array((int)$comb['id'], $lv['allowed'], true);
+            }
+            unset($comb);
             if (empty($lv['product_name']) && $lv['id_product']) {
                 $lv['product_name'] = JosraGiftRule::getProductName((int)$lv['id_product'], $idLang);
             }
@@ -549,7 +584,7 @@ class JosraGiftAdmin
                             'id' => 'id',
                             'name' => 'name',
                         ),
-                        'desc' => $this->l('Se usa el precio que paga el cliente (con las rebajas del producto). Los cupones no restan.'),
+                        'desc' => $this->l('Se usa el precio que paga el cliente (con las rebajas del producto). Los cupones solo restan si activas «Restar descuentos y cupones».'),
                     ),
                     array(
                         'type' => 'switch',
@@ -558,6 +593,38 @@ class JosraGiftAdmin
                         'is_bool' => true,
                         'values' => $yesNo,
                         'form_group_class' => 'josra-only-amount',
+                    ),
+                    array(
+                        'type' => 'switch',
+                        'label' => $this->l('Restar descuentos y cupones'),
+                        'name' => 'after_discounts',
+                        'is_bool' => true,
+                        'values' => $yesNo,
+                        'form_group_class' => 'josra-only-amount',
+                        'desc' => $this->l('Sí: cuenta el importe después de los cupones y reglas de descuento del carrito (el transporte gratis no resta).'),
+                    ),
+                    array(
+                        'type' => 'select',
+                        'label' => $this->l('Cuántos regalos elige'),
+                        'name' => 'choice_mode',
+                        'form_group_class' => 'josra-only-choice',
+                        'options' => array(
+                            'query' => array(
+                                array('id' => 'one', 'name' => $this->l('Uno por pedido')),
+                                array('id' => 'per_level', 'name' => $this->l('Uno por cada tramo alcanzado')),
+                            ),
+                            'id' => 'id',
+                            'name' => 'name',
+                        ),
+                    ),
+                    array(
+                        'type' => 'switch',
+                        'label' => $this->l('Puede elegir también los regalos de los tramos de abajo'),
+                        'name' => 'choice_lower',
+                        'is_bool' => true,
+                        'values' => $yesNo,
+                        'form_group_class' => 'josra-only-choice',
+                        'desc' => $this->l('Sí: al llegar a 100 € puede elegir entre los regalos de 100 € y los de 50 €. No: solo los de su tramo.'),
                     ),
                     array(
                         'type' => 'html',
@@ -719,6 +786,7 @@ class JosraGiftAdmin
                 'id_product_attribute' => isset($row['id_product_attribute']) ? (int)$row['id_product_attribute'] : 0,
                 'gift_qty' => isset($row['gift_qty']) ? max(1, (int)$row['gift_qty']) : 1,
                 'product_name' => isset($row['product_name']) ? (string)$row['product_name'] : '',
+                'allowed' => isset($row['allowed']) ? JosraGiftRule::parseIds($row['allowed']) : array(),
             );
             if ($clean && !$level['id_product'] && !$level['trigger_value']) {
                 continue;
@@ -780,6 +848,23 @@ class JosraGiftAdmin
             $hasCombinations = (bool)Db::getInstance()->getValue(
                 'SELECT 1 FROM `' . _DB_PREFIX_ . 'product_attribute` WHERE `id_product` = ' . (int)$lv['id_product']
             );
+            if ($type === JosraGiftRule::TRIGGER_CHOICE) {
+                // el cliente elige la combinación: se guardan solo las marcadas que son de ese producto (ninguna = todas)
+                $lv['id_product_attribute'] = 0;
+                $ok = array();
+                if ($hasCombinations && $lv['allowed']) {
+                    foreach ((array)Db::getInstance()->executeS('SELECT `id_product_attribute` FROM `' . _DB_PREFIX_ . 'product_attribute`
+                        WHERE `id_product` = ' . (int)$lv['id_product'] . ' AND `id_product_attribute` IN (' . implode(',', array_map('intval', $lv['allowed'])) . ')') as $r) {
+                        $ok[] = (int)$r['id_product_attribute'];
+                    }
+                }
+                $lv['allowed'] = $ok;
+                if ($lv['trigger_value'] <= 0) {
+                    $errors[] = sprintf($this->l('Regalo %d: indica a partir de qué importe se puede elegir.'), $n);
+                }
+                continue;
+            }
+            $lv['allowed'] = array();
             if ($hasCombinations) {
                 $belongs = $lv['id_product_attribute'] && Db::getInstance()->getValue(
                     'SELECT 1 FROM `' . _DB_PREFIX_ . 'product_attribute`
@@ -834,6 +919,9 @@ class JosraGiftAdmin
         $rule->date_end = $dateEnd !== '' ? $dateEnd : null;
         $rule->max_uses = max(0, (int)Tools::getValue('max_uses'));
         $rule->priority = max(0, (int)Tools::getValue('priority'));
+        $rule->choice_mode = Tools::getValue('choice_mode') === 'per_level' ? 'per_level' : 'one';
+        $rule->choice_lower = (int)Tools::getValue('choice_lower') ? 1 : 0;
+        $rule->after_discounts = (int)Tools::getValue('after_discounts') ? 1 : 0;
         if (!$rule->id) {
             $rule->uses_count = 0;
         }
