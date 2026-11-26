@@ -3,7 +3,8 @@
  * josra_giftproduct - Producto de regalo automático
  *
  * Añade solo al carrito un producto de regalo según reglas (importe, número
- * de productos o un producto concreto), a precio cero y con etiqueta "REGALO".
+ * de productos o un producto concreto), gratis y con etiqueta "REGALO": a precio
+ * cero o a su precio con un vale de descuento nativo (ajuste «Cómo sale el regalo»).
  * Compatible con PrestaShop 1.6, 1.7, 8 y 9 (PHP 5.6+). Sin overrides.
  *
  * @author    josra
@@ -32,7 +33,7 @@ class Josra_giftproduct extends Module
     {
         $this->name = 'josra_giftproduct';
         $this->tab = 'pricing_promotion';
-        $this->version = '2.1.0';
+        $this->version = '2.2.0';
         $this->author = 'josra';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -41,7 +42,7 @@ class Josra_giftproduct extends Module
         parent::__construct();
 
         $this->displayName = $this->l('Producto de regalo automático');
-        $this->description = $this->l('Regalos a precio cero según importe, cantidad o producto comprado: automáticos o a elegir por el cliente por tramos de importe.');
+        $this->description = $this->l('Regalos gratis según importe, cantidad o producto comprado, automáticos o a elegir por tramos: a precio cero o a su precio con un vale de descuento.');
         $this->confirmUninstall = $this->l('Se borrarán las reglas y las estadísticas de regalos. ¿Seguro?');
     }
 
@@ -102,7 +103,7 @@ class Josra_giftproduct extends Module
         Configuration::deleteByName('JOSRA_GIFTPRODUCT_UPD_SU');
         Configuration::deleteByName('JOSRA_GIFTPRODUCT_UPD_LT');
 
-        // Primero los precios a cero de los carritos abiertos: si no, seguirían gratis.
+        // Primero los precios a cero y los vales de los carritos abiertos: si no, seguirían gratis.
         JosraGiftCart::deleteAllSpecificPrices();
         JosraGiftChoice::deleteAllSpecificPrices();
         foreach (array('josra_gift_rule', 'josra_gift_rule_level', 'josra_gift_rule_restriction',
@@ -140,6 +141,8 @@ class Josra_giftproduct extends Module
             'actionValidateOrder',
             'actionOrderStatusPostUpdate',
             'displayShoppingCartFooter',
+            // vuelve a meter el vale del regalo si el cliente lo quita (modo vale)
+            'actionDispatcher',
         );
         if (self::isPs17()) {
             $hooks[] = 'actionFrontControllerSetMedia';
@@ -185,6 +188,8 @@ class Josra_giftproduct extends Module
             'JOSRA_GIFT_MARK_ORDER_LINE' => 1,
             'JOSRA_GIFT_LOW_STOCK' => 5,
             'JOSRA_GIFT_DEBUG' => 0,
+            // como siempre: el regalo a precio cero
+            'JOSRA_GIFT_PRICE_MODE' => 'zero',
         );
         foreach ($defaults as $key => $value) {
             if (Configuration::get($key) === false) {
@@ -426,6 +431,30 @@ class Josra_giftproduct extends Module
     public function hookActionAfterDeleteProductInCart($params)
     {
         $this->getManager()->sync($this->context->cart);
+    }
+
+    /**
+     * Antes de cada página de la tienda (también las de los módulos de pago):
+     * si el cliente ha quitado el vale de un regalo, se vuelve a meter.
+     * Solo hace algo en el modo «a su precio con un vale».
+     */
+    public function hookActionDispatcher($params)
+    {
+        if (defined('_PS_ADMIN_DIR_') || JosraGiftCart::priceMode() !== 'coupon') {
+            return;
+        }
+        if (isset($params['controller_type']) && (int)$params['controller_type'] === (int)Dispatcher::FC_ADMIN) {
+            return;
+        }
+        $cookie = $this->context->cookie;
+        $idCart = is_object($cookie) && isset($cookie->id_cart) ? (int)$cookie->id_cart : 0;
+        if ($idCart) {
+            try {
+                $this->getManager()->reattachCoupons($idCart);
+            } catch (Exception $e) {
+                JosraGiftManager::log('ERROR vale cart=' . $idCart . ' ' . $e->getMessage());
+            }
+        }
     }
 
     // =========================================================================

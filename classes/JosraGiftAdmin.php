@@ -1005,6 +1005,7 @@ class JosraGiftAdmin
             'JOSRA_GIFT_MARK_ORDER_LINE',
             'JOSRA_GIFT_LOW_STOCK',
             'JOSRA_GIFT_DEBUG',
+            'JOSRA_GIFT_PRICE_MODE',
         );
     }
 
@@ -1019,13 +1020,27 @@ class JosraGiftAdmin
                 'legend' => array('title' => $this->l('Ajustes generales'), 'icon' => 'icon-cogs'),
                 'input' => array(
                     array(
+                        'type' => 'select',
+                        'label' => $this->l('Cómo sale el regalo'),
+                        'name' => 'JOSRA_GIFT_PRICE_MODE',
+                        'options' => array(
+                            'query' => array(
+                                array('id' => 'zero', 'name' => $this->l('A precio 0 (como siempre)')),
+                                array('id' => 'coupon', 'name' => $this->l('A su precio, con un vale que descuenta su importe')),
+                            ),
+                            'id' => 'id',
+                            'name' => 'name',
+                        ),
+                        'desc' => $this->l('Con el vale, el regalo va en el carrito, el pedido y la factura a su precio real, y debajo sale un descuento «REGALO: producto» por el mismo importe, con el IVA del producto. El total es el mismo. Es un vale normal de PrestaShop (Catálogo > Descuentos), solo para ese carrito: el pedido se importa como cualquier otro pedido con descuento. Los carritos abiertos se pasan solos al modo nuevo.'),
+                    ),
+                    array(
                         'type' => 'text',
                         'label' => $this->l('Texto de la etiqueta'),
                         'name' => 'JOSRA_GIFT_BADGE_TEXT',
                         'lang' => true,
                         'required' => true,
                         'col' => 4,
-                        'desc' => $this->l('Se ve junto al producto regalado en el carrito y se añade al nombre de la línea del pedido.'),
+                        'desc' => $this->l('Se ve junto al producto regalado en el carrito y se añade al nombre de la línea del pedido. Con el vale, también es el principio del nombre del descuento.'),
                     ),
                     array(
                         'type' => 'color',
@@ -1135,6 +1150,7 @@ class JosraGiftAdmin
         Configuration::updateValue('JOSRA_GIFT_MARK_ORDER_LINE', (int)Tools::getValue('JOSRA_GIFT_MARK_ORDER_LINE'));
         Configuration::updateValue('JOSRA_GIFT_LOW_STOCK', max(0, (int)Tools::getValue('JOSRA_GIFT_LOW_STOCK')));
         Configuration::updateValue('JOSRA_GIFT_DEBUG', (int)Tools::getValue('JOSRA_GIFT_DEBUG'));
+        Configuration::updateValue('JOSRA_GIFT_PRICE_MODE', Tools::getValue('JOSRA_GIFT_PRICE_MODE') === 'coupon' ? 'coupon' : 'zero');
         return array();
     }
 }

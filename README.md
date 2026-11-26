@@ -2,8 +2,14 @@
 
 Módulo para PrestaShop **1.6, 1.7, 8 y 9** (PHP 5.6+, sin overrides).
 
-Mete solo en el carrito un producto de regalo, a **precio cero** y con una etiqueta
+Mete solo en el carrito un producto de regalo, gratis y con una etiqueta
 (**REGALO**, texto y colores configurables), como hacían las antiguas reglas de carrito.
+
+Ajuste **«Cómo sale el regalo»**:
+- **A precio 0** (como siempre, por defecto).
+- **A su precio, con un vale**: el regalo va a su precio real y un vale nativo de PrestaShop
+  («REGALO: producto», solo para ese carrito) descuenta su importe con el IVA del producto.
+  Así en la factura no sale ninguna línea a 0 €. El total es el mismo.
 
 ## Reglas
 - **Por importe** del carrito (con o sin IVA, sumando o no el envío) con varios tramos:

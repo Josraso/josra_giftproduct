@@ -5,7 +5,8 @@
  * - Los tramos son las filas de la regla con el mismo «Desde»: cada fila es un regalo que se puede elegir en ese tramo.
  * - Uno por pedido o uno por cada tramo alcanzado (según la regla); con o sin los regalos de los tramos de abajo.
  * - Si el regalo tiene combinaciones, el cliente elige cuál (todas o solo las marcadas en la regla, con stock).
- * - El regalo elegido se mete en el carrito a precio cero (precio específico del carrito, como los automáticos).
+ * - El regalo elegido se mete en el carrito gratis, como los automáticos: a precio cero o a su precio con un vale,
+ *   según el ajuste «Cómo sale el regalo».
  * - Si el carrito baja de tramo, el regalo se agota o deja de valer, se quita solo y se avisa.
  *
  * Compatible PHP 5.6+ / PrestaShop 1.6 - 9.
@@ -17,7 +18,7 @@ if (!defined('_PS_VERSION_')) {
 
 class JosraGiftChoice
 {
-    const SCHEMA = 210;
+    const SCHEMA = 220;
 
     /** @var JosraGiftManager */
     protected $manager;
@@ -51,6 +52,7 @@ class JosraGiftChoice
             `id_product_attribute` INT(10) UNSIGNED NOT NULL DEFAULT 0,
             `gift_qty` INT(10) UNSIGNED NOT NULL DEFAULT 1,
             `id_specific_price` INT(10) UNSIGNED NOT NULL DEFAULT 0,
+            `id_cart_rule` INT(10) UNSIGNED NOT NULL DEFAULT 0,
             `date_upd` DATETIME NOT NULL,
             PRIMARY KEY (`id_cart`, `slot`)
         ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4');
@@ -59,6 +61,9 @@ class JosraGiftChoice
             array('josra_gift_rule', 'choice_lower', 'TINYINT(1) NOT NULL DEFAULT 1'),
             array('josra_gift_rule', 'after_discounts', 'TINYINT(1) NOT NULL DEFAULT 0'),
             array('josra_gift_rule_level', 'allowed_attributes', 'VARCHAR(2000) NOT NULL DEFAULT \'\''),
+            // 2.2.0: vale del regalo (modo «a su precio con un vale»)
+            array('josra_gift_cart', 'id_cart_rule', 'INT(10) UNSIGNED NOT NULL DEFAULT 0'),
+            array('josra_gift_choice', 'id_cart_rule', 'INT(10) UNSIGNED NOT NULL DEFAULT 0'),
         );
         foreach ($cols as $c) {
             $exists = $db->executeS('SHOW COLUMNS FROM `' . $p . $c[0] . '` LIKE \'' . pSQL($c[1]) . '\'');
@@ -82,8 +87,8 @@ class JosraGiftChoice
         $out = array();
         $rows = Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'josra_gift_choice` WHERE `id_cart` = ' . (int)$idCart);
         foreach ((array)$rows as $r) {
-            foreach (array('id_cart', 'id_josra_gift_rule', 'id_josra_gift_rule_level', 'id_product', 'id_product_attribute', 'gift_qty', 'id_specific_price') as $k) {
-                $r[$k] = (int)$r[$k];
+            foreach (array('id_cart', 'id_josra_gift_rule', 'id_josra_gift_rule_level', 'id_product', 'id_product_attribute', 'gift_qty', 'id_specific_price', 'id_cart_rule') as $k) {
+                $r[$k] = isset($r[$k]) ? (int)$r[$k] : 0;
             }
             $out[$r['slot']] = $r;
         }
@@ -92,6 +97,7 @@ class JosraGiftChoice
 
     protected static function saveRow(array $row)
     {
+        self::ensureSchema();
         return Db::getInstance()->insert('josra_gift_choice', array(
             'id_cart' => (int)$row['id_cart'],
             'slot' => pSQL($row['slot']),
@@ -101,6 +107,7 @@ class JosraGiftChoice
             'id_product_attribute' => (int)$row['id_product_attribute'],
             'gift_qty' => max(1, (int)$row['gift_qty']),
             'id_specific_price' => (int)$row['id_specific_price'],
+            'id_cart_rule' => isset($row['id_cart_rule']) ? (int)$row['id_cart_rule'] : 0,
             'date_upd' => date('Y-m-d H:i:s'),
         ), false, true, Db::REPLACE);
     }
@@ -115,22 +122,27 @@ class JosraGiftChoice
         if (!Db::getInstance()->executeS('SHOW TABLES LIKE \'' . pSQL(_DB_PREFIX_ . 'josra_gift_choice') . '\'')) {
             return;
         }
-        foreach ((array)Db::getInstance()->executeS('SELECT `id_cart`, `id_specific_price` FROM `' . _DB_PREFIX_ . 'josra_gift_choice` WHERE `id_specific_price` > 0') as $r) {
+        self::ensureSchema();
+        foreach ((array)Db::getInstance()->executeS('SELECT `id_cart`, `id_specific_price`, `id_cart_rule` FROM `' . _DB_PREFIX_ . 'josra_gift_choice`
+            WHERE `id_specific_price` > 0 OR `id_cart_rule` > 0') as $r) {
             JosraGiftCart::deleteSpecificPrice((int)$r['id_specific_price'], (int)$r['id_cart']);
+            JosraGiftCart::deleteCoupon((int)$r['id_cart_rule'], (int)$r['id_cart']);
         }
     }
 
-    /** Carritos ya convertidos en pedido o abandonados: fuera sus precios a cero */
+    /** Carritos ya convertidos en pedido o abandonados: fuera sus precios a cero y sus vales sin usar */
     public static function cleanup($days = 30)
     {
+        self::ensureSchema();
         $limit = pSQL(date('Y-m-d H:i:s', time() - (int)$days * 86400));
         $rows = Db::getInstance()->executeS(
-            'SELECT gc.`id_cart`, gc.`slot`, gc.`id_specific_price` FROM `' . _DB_PREFIX_ . 'josra_gift_choice` gc
+            'SELECT gc.`id_cart`, gc.`slot`, gc.`id_specific_price`, gc.`id_cart_rule` FROM `' . _DB_PREFIX_ . 'josra_gift_choice` gc
              LEFT JOIN `' . _DB_PREFIX_ . 'orders` o ON o.`id_cart` = gc.`id_cart`
              WHERE o.`id_order` IS NOT NULL OR gc.`date_upd` < \'' . $limit . '\' LIMIT 500'
         );
         foreach ((array)$rows as $r) {
             JosraGiftCart::deleteSpecificPrice((int)$r['id_specific_price'], (int)$r['id_cart']);
+            JosraGiftCart::deleteCoupon((int)$r['id_cart_rule'], (int)$r['id_cart']);
             self::deleteRow((int)$r['id_cart'], $r['slot']);
         }
     }
@@ -335,6 +347,7 @@ class JosraGiftChoice
             'id_product_attribute' => $idAttr,
             'gift_qty' => $qty,
             'id_specific_price' => 0,
+            'id_cart_rule' => 0,
         );
         $this->manager->applyPrice($cart, $row);
         self::saveRow($row);
@@ -352,7 +365,7 @@ class JosraGiftChoice
         return true;
     }
 
-    /** Saca del carrito las unidades regaladas de una fila y su precio a cero */
+    /** Saca del carrito las unidades regaladas de una fila y su precio a cero o su vale */
     protected function take($cart, array $row)
     {
         $line = $this->manager->lineQty($cart->getProducts(true), $row['id_product'], $row['id_product_attribute']);
@@ -360,7 +373,7 @@ class JosraGiftChoice
         if ($remove > 0) {
             $this->manager->updateQty($cart, $row['id_product'], $row['id_product_attribute'], $remove, 'down');
         }
-        JosraGiftCart::deleteSpecificPrice($row['id_specific_price'], $cart->id);
+        JosraGiftCart::releaseDiscount($row, $cart->id);
     }
 
     // =========================================================================
@@ -378,7 +391,7 @@ class JosraGiftChoice
         $tiers = array();
         if ($rule) {
             $tiers = $this->tiers($rule);
-            // el importe sin los regalos (van a cero) es el mismo con o sin ellos
+            // el importe no cuenta los regalos (a precio cero o con su vale)
             foreach ($this->slots($rule, $tiers, $this->value($cart, $rule)) as $s) {
                 $valid[$s['slot']] = $s;
             }
@@ -403,7 +416,7 @@ class JosraGiftChoice
                     $line = $this->manager->lineQty($products, $row['id_product'], $row['id_product_attribute']);
                     if ($line <= 0) {
                         // lo ha quitado el cliente desde el carrito: puede volver a elegir
-                        JosraGiftCart::deleteSpecificPrice($row['id_specific_price'], $cart->id);
+                        JosraGiftCart::releaseDiscount($row, $cart->id);
                         self::deleteRow($cart->id, $slot);
                         continue;
                     }
@@ -423,10 +436,10 @@ class JosraGiftChoice
                     : sprintf(Module::getInstanceByName('josra_giftproduct')->l('Tu pedido ya no llega al regalo %s: lo hemos quitado.', 'josragiftchoice'), $name));
                 continue;
             }
-            // mismo regalo: el precio a cero al día (por si cambian las unidades pagadas de esa línea)
-            $before = $row['id_specific_price'];
+            // mismo regalo: el precio a cero o el vale al día (por si cambian las unidades pagadas o el precio)
+            $before = $row['id_specific_price'] . '-' . $row['id_cart_rule'];
             $this->manager->applyPrice($cart, $row);
-            if ($row['id_specific_price'] !== $before) {
+            if ($row['id_specific_price'] . '-' . $row['id_cart_rule'] !== $before) {
                 self::saveRow($row);
             }
         }
@@ -644,6 +657,7 @@ class JosraGiftChoice
                     array('product_name' => pSQL(Tools::substr($detail['product_name'] . ' - ' . $label, 0, 255))),
                     'id_order_detail = ' . (int)$detail['id_order_detail']);
             }
+            // el vale (modo vale) se queda: ya es parte del pedido
             JosraGiftCart::deleteSpecificPrice($row['id_specific_price'], $idCart);
         }
         // «Regalos disponibles» se cuenta por pedidos

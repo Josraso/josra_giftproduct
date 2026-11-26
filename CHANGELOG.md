@@ -1,5 +1,15 @@
 # Changelog — josra_giftproduct
 
+## 2.2.0 — 2026-11-26
+- Nuevo ajuste «Cómo sale el regalo» en Ajustes generales:
+  - «A precio 0 (como siempre)»: viene así por defecto y no cambia nada.
+  - «A su precio, con un vale que descuenta su importe»: el regalo va en el carrito, el pedido y la factura a su precio real, y debajo sale un descuento nativo de PrestaShop «REGALO: producto» por el mismo importe y con el IVA (y el recargo) del producto. El total del pedido es el mismo. Para que en la factura no salga ninguna línea a 0 €.
+- El vale es un vale normal (Catálogo > Descuentos), con código secreto y solo para ese carrito. El pedido se importa a FacturaScripts como cualquier pedido con descuento.
+- Con el vale, el regalo sigue sin contar para llegar al tramo (como cuando va a 0 €), también con «restar cupones y descuentos».
+- Si el cliente quita el vale en el carrito, vuelve a salir solo. Si quita el regalo, se va también su vale.
+- Sirve para los regalos automáticos y para los que elige el cliente. Al cambiar el ajuste, los carritos abiertos se pasan solos al modo nuevo.
+- Los vales de carritos abandonados se borran solos. Los que ya están en un pedido se quedan, porque son parte de ese pedido.
+
 ## 2.1.0 — 2026-11-24
 - Nuevo tipo de regla «Importe del carrito: el cliente elige el regalo». Los tramos se hacen poniendo el mismo «Desde» en varias filas: cada fila es un regalo que se puede elegir en ese tramo.
 - En cada regalo con combinaciones marcas cuáles puede elegir el cliente (ninguna = todas). Solo salen las que tienen stock.
