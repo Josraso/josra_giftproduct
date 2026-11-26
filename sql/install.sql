@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS `PREFIX_josra_gift_cart` (
     `in_cart`                  TINYINT(1)       NOT NULL DEFAULT 0,
     `declined`                 TINYINT(1)       NOT NULL DEFAULT 0,
     `id_specific_price`        INT(10) UNSIGNED NOT NULL DEFAULT 0,
+    `id_cart_rule`             INT(10) UNSIGNED NOT NULL DEFAULT 0,
     `notice`                   VARCHAR(16)      NOT NULL DEFAULT '',
     `notice_data`              VARCHAR(255)     NOT NULL DEFAULT '',
     `date_upd`                 DATETIME         NOT NULL,
@@ -92,6 +93,7 @@ CREATE TABLE IF NOT EXISTS `PREFIX_josra_gift_choice` (
     `id_product_attribute`     INT(10) UNSIGNED NOT NULL DEFAULT 0,
     `gift_qty`                 INT(10) UNSIGNED NOT NULL DEFAULT 1,
     `id_specific_price`        INT(10) UNSIGNED NOT NULL DEFAULT 0,
+    `id_cart_rule`             INT(10) UNSIGNED NOT NULL DEFAULT 0,
     `date_upd`                 DATETIME         NOT NULL,
     PRIMARY KEY (`id_cart`, `slot`)
 ) ENGINE=ENGINE_TYPE DEFAULT CHARSET=utf8mb4;

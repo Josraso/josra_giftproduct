@@ -1,7 +1,9 @@
 <?php
 /**
  * Motor del regalo: decide qué regalo toca, lo mete o lo quita del carrito
- * y le aplica el precio a cero con un precio específico ligado al carrito.
+ * y lo deja gratis de una de estas dos formas (ajuste «Cómo sale el regalo»):
+ * - a precio cero, con un precio específico ligado al carrito (como siempre);
+ * - a su precio, con un vale (regla de carrito nativa) que descuenta su importe.
  * Compatible PHP 5.6+ / PrestaShop 1.6 - 9.
  */
 
@@ -62,6 +64,7 @@ class JosraGiftManager
         if (defined('_PS_ADMIN_DIR_') || $cart->orderExists()) {
             return;
         }
+        JosraGiftChoice::ensureSchema();
         self::$running[$idCart] = true;
         try {
             $this->doSync($cart);
@@ -93,8 +96,7 @@ class JosraGiftManager
         // hasta que pulse "Recuperar regalo".
         if ($state['in_cart'] && $lineQty === 0) {
             self::log('cart=' . $cart->id . ' regalo quitado por el cliente');
-            JosraGiftCart::deleteSpecificPrice($state['id_specific_price'], $cart->id);
-            $state['id_specific_price'] = 0;
+            JosraGiftCart::releaseDiscount($state, $cart->id);
             $state['in_cart'] = 0;
             $state['declined'] = 1;
         }
@@ -109,9 +111,10 @@ class JosraGiftManager
             if ($state['declined']) {
                 // Se recuerda el rechazo mientras viva el carrito.
                 $state['in_cart'] = 0;
-                $state['id_specific_price'] = 0;
+                JosraGiftCart::releaseDiscount($state, $cart->id);
                 JosraGiftCart::save($state);
-            } elseif ($state['id_product'] || $state['id_specific_price']) {
+            } elseif ($state['id_product'] || $state['id_specific_price'] || $state['id_cart_rule']) {
+                JosraGiftCart::releaseDiscount($state, $cart->id);
                 JosraGiftCart::delete($cart->id);
             }
             return;
@@ -169,7 +172,7 @@ class JosraGiftManager
         $state['gift_qty'] = (int)$level['gift_qty'];
         $state['in_cart'] = 1;
         $state['declined'] = 0;
-        $state['id_specific_price'] = 0;
+        JosraGiftCart::releaseDiscount($state, $cart->id);
 
         if ($target['fallback']) {
             $state['notice'] = 'fallback';
@@ -389,16 +392,94 @@ class JosraGiftManager
         $withTax = $rule['calc_mode'] === 'with_tax';
         // Sin caché: el carrito puede haber cambiado en esta misma petición.
         $value = (float)$cart->getOrderTotal($withTax, Cart::ONLY_PRODUCTS, null, null, false);
-        if (!empty($rule['after_discounts'])) {
-            // descuentos y cupones del carrito (sin los de transporte gratis)
-            $value -= (float)$cart->getOrderTotal($withTax, Cart::ONLY_DISCOUNTS, null, null, false)
-                - (float)$this->freeShippingDiscount($cart, $withTax);
-            $value = max(0, $value);
+        // Regalos a su precio (modo vale): sus unidades regaladas no cuentan para el tramo,
+        // igual que no cuentan cuando van a precio cero.
+        $couponMode = JosraGiftCart::priceMode() === 'coupon';
+        if ($couponMode) {
+            $value -= $this->giftLinesValue($cart, $withTax);
         }
+        if (!empty($rule['after_discounts'])) {
+            // descuentos y cupones del carrito (sin los de transporte gratis ni los vales de los regalos)
+            $value -= (float)$cart->getOrderTotal($withTax, Cart::ONLY_DISCOUNTS, null, null, false)
+                - (float)$this->freeShippingDiscount($cart, $withTax)
+                - ($couponMode ? $this->ownCouponsValue($cart, $withTax) : 0.0);
+        }
+        $value = max(0, $value);
         if ((int)$rule['include_shipping']) {
             $value += (float)$cart->getOrderTotal($withTax, Cart::ONLY_SHIPPING, null, null, false);
         }
         return $this->toDefaultCurrency($value, (int)$cart->id_currency);
+    }
+
+    /** Lo que valen en el carrito las unidades regaladas (automático y elegidas), con o sin IVA */
+    protected function giftLinesValue($cart, $withTax)
+    {
+        $gifts = array();
+        $state = JosraGiftCart::get($cart->id);
+        if ($state && $state['in_cart'] && $state['id_product']) {
+            $gifts[] = $state;
+        }
+        foreach (JosraGiftChoice::rows($cart->id) as $row) {
+            $gifts[] = $row;
+        }
+        if (!$gifts) {
+            return 0.0;
+        }
+        $products = $cart->getProducts();
+        $total = 0.0;
+        foreach ($gifts as $g) {
+            $line = $this->cartLine($products, $g['id_product'], $g['id_product_attribute']);
+            if ($line) {
+                $free = min((int)$g['gift_qty'], (int)$line['cart_quantity']);
+                $total += $free * (float)($withTax ? $line['price_wt'] : $line['price']);
+            }
+        }
+        return $total;
+    }
+
+    /** Lo que descuentan en el carrito los vales de los regalos */
+    protected function ownCouponsValue($cart, $withTax)
+    {
+        $ids = $this->ownCouponIds($cart->id);
+        if (!$ids) {
+            return 0.0;
+        }
+        $total = 0.0;
+        foreach ((array)$cart->getCartRules() as $r) {
+            if (in_array((int)$r['id_cart_rule'], $ids)) {
+                $total += (float)($withTax ? $r['value_real'] : $r['value_tax_exc']);
+            }
+        }
+        return $total;
+    }
+
+    /** Ids de los vales de regalo de un carrito (automático y elegidos) */
+    public function ownCouponIds($idCart)
+    {
+        $ids = array();
+        $state = JosraGiftCart::get($idCart);
+        if ($state && $state['id_cart_rule']) {
+            $ids[] = (int)$state['id_cart_rule'];
+        }
+        foreach (JosraGiftChoice::rows($idCart) as $row) {
+            if ($row['id_cart_rule']) {
+                $ids[] = (int)$row['id_cart_rule'];
+            }
+        }
+        return $ids;
+    }
+
+    /** Fila del carrito de un producto y combinación (sin personalizaciones) */
+    public function cartLine(array $products, $idProduct, $idAttr)
+    {
+        foreach ($products as $p) {
+            if ((int)$p['id_product'] === (int)$idProduct
+                && (int)$p['id_product_attribute'] === (int)$idAttr
+                && empty($p['id_customization'])) {
+                return $p;
+            }
+        }
+        return null;
     }
 
     /** Parte de los descuentos que es el transporte gratis (no resta del importe de los productos) */
@@ -630,18 +711,207 @@ class JosraGiftManager
         if ($remove > 0) {
             $this->updateQty($cart, $state['id_product'], $state['id_product_attribute'], $remove, 'down');
         }
-        JosraGiftCart::deleteSpecificPrice($state['id_specific_price'], $cart->id);
-        $state['id_specific_price'] = 0;
+        JosraGiftCart::releaseDiscount($state, $cart->id);
         $state['in_cart'] = 0;
         $this->flushCaches($cart);
     }
 
     /**
-     * Precio específico del carrito: porcentaje de descuento sobre la línea
-     * para que las unidades de regalo salgan gratis y el resto se cobre.
-     * En porcentaje no depende del IVA ni de la dirección del cliente.
+     * Deja gratis las unidades regaladas según el ajuste «Cómo sale el regalo».
+     * Si se ha cambiado el ajuste con carritos abiertos, quita lo del otro modo.
      */
     public function applyPrice($cart, array &$state)
+    {
+        if (!isset($state['id_cart_rule'])) {
+            $state['id_cart_rule'] = 0;
+        }
+        if (JosraGiftCart::priceMode() === 'coupon') {
+            if ($state['id_specific_price']) {
+                JosraGiftCart::deleteSpecificPrice($state['id_specific_price'], $cart->id);
+                $state['id_specific_price'] = 0;
+                $this->flushCaches($cart);
+            }
+            $this->applyCoupon($cart, $state);
+            return;
+        }
+        if ($state['id_cart_rule']) {
+            JosraGiftCart::deleteCoupon($state['id_cart_rule'], $cart->id);
+            $state['id_cart_rule'] = 0;
+            $this->flushCaches($cart);
+        }
+        $this->applyZeroPrice($cart, $state);
+    }
+
+    /**
+     * Modo vale: el regalo va a su precio y un vale (regla de carrito nativa,
+     * con código secreto y solo para ese carrito) descuenta lo que valen las
+     * unidades regaladas. El vale va limitado al producto regalado, así que
+     * PrestaShop le aplica el IVA (y el recargo) de ese producto.
+     */
+    public function applyCoupon($cart, array &$state)
+    {
+        $products = $cart->getProducts(true);
+        $line = $this->cartLine($products, $state['id_product'], $state['id_product_attribute']);
+        $lineQty = $this->lineQty($products, $state['id_product'], $state['id_product_attribute']);
+        $free = $line ? min((int)$state['gift_qty'], $lineQty) : 0;
+        // Igual que en el modo precio a cero: nunca sin combinación en un producto con combinaciones.
+        if (!(int)$state['id_product_attribute'] && $this->hasCombinations((int)$state['id_product'])) {
+            $free = 0;
+        }
+        $amount = $free > 0 ? Tools::ps_round($free * (float)$line['price_wt'], 2) : 0;
+        if ($amount <= 0) {
+            JosraGiftCart::deleteCoupon($state['id_cart_rule'], $cart->id);
+            $state['id_cart_rule'] = 0;
+            $this->flushCaches($cart);
+            return;
+        }
+
+        $cr = null;
+        if ($state['id_cart_rule']) {
+            $cr = new CartRule((int)$state['id_cart_rule']);
+            if (!JosraGiftCart::isOwnCoupon($cr, $cart->id) || JosraGiftCart::couponUsed($cr->id)) {
+                $cr = null;
+            }
+        }
+        $names = $this->couponNames($state, $free);
+        $changed = true;
+        if ($cr) {
+            $changed = abs((float)$cr->reduction_amount - $amount) > 0.001
+                || (int)$cr->reduction_currency !== (int)$cart->id_currency
+                || (int)$cr->reduction_product !== (int)$state['id_product']
+                || !(int)$cr->active || (int)$cr->quantity < 1
+                || strtotime($cr->date_to) < time() + 15 * 86400;
+            foreach ($names as $idLang => $name) {
+                if (!isset($cr->name[$idLang]) || $cr->name[$idLang] !== $name) {
+                    $changed = true;
+                }
+            }
+        } else {
+            $cr = new CartRule();
+            $cr->code = 'REGALO-' . (int)$cart->id . '-' . Tools::strtoupper(Tools::passwdGen(10));
+        }
+
+        if ($changed) {
+            $cr->name = $names;
+            $cr->description = JosraGiftCart::couponTag($cart->id);
+            $cr->id_customer = 0;
+            $cr->date_from = date('Y-m-d H:i:s', time() - 86400);
+            $cr->date_to = date('Y-m-d H:i:s', time() + 60 * 86400);
+            $cr->quantity = 1;
+            $cr->quantity_per_user = 1;
+            $cr->priority = 0;
+            $cr->partial_use = 0;
+            $cr->minimum_amount = 0;
+            $cr->minimum_amount_tax = 0;
+            $cr->minimum_amount_currency = (int)$cart->id_currency;
+            $cr->minimum_amount_shipping = 0;
+            $cr->country_restriction = 0;
+            $cr->carrier_restriction = 0;
+            $cr->group_restriction = 0;
+            $cr->cart_rule_restriction = 0;
+            $cr->product_restriction = 0;
+            $cr->shop_restriction = 0;
+            $cr->free_shipping = 0;
+            $cr->reduction_percent = 0;
+            $cr->reduction_amount = $amount;
+            $cr->reduction_tax = 1;
+            $cr->reduction_currency = (int)$cart->id_currency;
+            $cr->reduction_product = (int)$state['id_product'];
+            if (property_exists($cr, 'reduction_exclude_special')) {
+                $cr->reduction_exclude_special = 0;
+            }
+            $cr->gift_product = 0;
+            $cr->gift_product_attribute = 0;
+            $cr->highlight = 0;
+            $cr->active = 1;
+            $ok = $cr->id ? $cr->update() : $cr->add();
+            if (!$ok) {
+                self::log('cart=' . $cart->id . ' no se pudo guardar el vale del regalo ' . $state['id_product']);
+                $state['id_cart_rule'] = 0;
+                return;
+            }
+        }
+        $state['id_cart_rule'] = (int)$cr->id;
+        $this->attachCoupon($cart, (int)$cr->id);
+        $this->flushCaches($cart);
+    }
+
+    /** Mete el vale en el carrito si no está (también si el cliente lo ha quitado) */
+    public function attachCoupon($cart, $idCartRule)
+    {
+        $inCart = Db::getInstance()->getValue(
+            'SELECT 1 FROM `' . _DB_PREFIX_ . 'cart_cart_rule`
+             WHERE `id_cart` = ' . (int)$cart->id . ' AND `id_cart_rule` = ' . (int)$idCartRule
+        );
+        if (!$inCart) {
+            $cart->addCartRule((int)$idCartRule);
+            JosraGiftCart::flushCartRuleCache($cart->id);
+        }
+    }
+
+    /**
+     * Red de seguridad antes de cada página (también las de los módulos de pago):
+     * si el cliente ha quitado el vale de un regalo, se vuelve a meter tal cual
+     * (si no, pagaría el regalo). El importe se recalcula en la siguiente sincronización.
+     * Solo con el id del carrito: a esta hora PrestaShop aún no ha cargado el carrito en el contexto.
+     */
+    public function reattachCoupons($idCart)
+    {
+        $idCart = (int)$idCart;
+        if (!$idCart || JosraGiftCart::priceMode() !== 'coupon') {
+            return;
+        }
+        $ids = $this->ownCouponIds($idCart);
+        if (!$ids) {
+            return;
+        }
+        $have = array();
+        foreach ((array)Db::getInstance()->executeS(
+            'SELECT `id_cart_rule` FROM `' . _DB_PREFIX_ . 'cart_cart_rule` WHERE `id_cart` = ' . $idCart
+        ) as $r) {
+            $have[] = (int)$r['id_cart_rule'];
+        }
+        $missing = array_diff($ids, $have);
+        if (!$missing || Db::getInstance()->getValue('SELECT 1 FROM `' . _DB_PREFIX_ . 'orders` WHERE `id_cart` = ' . $idCart)) {
+            return;
+        }
+        foreach ($missing as $id) {
+            $cr = new CartRule((int)$id);
+            if (JosraGiftCart::isOwnCoupon($cr, $idCart) && (int)$cr->active && (int)$cr->quantity > 0) {
+                Db::getInstance()->insert('cart_cart_rule', array('id_cart_rule' => (int)$id, 'id_cart' => $idCart));
+                self::log('cart=' . $idCart . ' vale del regalo ' . (int)$id . ' quitado por el cliente: se vuelve a meter');
+            }
+        }
+        JosraGiftCart::flushCartRuleCache($idCart);
+    }
+
+    /** Nombre del vale en cada idioma: «REGALO: 2 x Producto (Talla M)» */
+    protected function couponNames(array $state, $free)
+    {
+        $names = array();
+        foreach (Language::getLanguages(false) as $lang) {
+            $idLang = (int)$lang['id_lang'];
+            $badge = Configuration::get('JOSRA_GIFT_BADGE_TEXT', $idLang);
+            $badge = $badge ? $badge : 'REGALO';
+            $name = JosraGiftRule::getProductName((int)$state['id_product'], $idLang);
+            if ((int)$state['id_product_attribute']) {
+                $comb = JosraGiftRule::getCombinationName((int)$state['id_product_attribute'], $idLang);
+                if ($comb !== '') {
+                    $name .= ' (' . $comb . ')';
+                }
+            }
+            $text = $badge . ': ' . ((int)$free > 1 ? (int)$free . ' x ' : '') . $name;
+            $names[$idLang] = Tools::substr(trim(strip_tags($text)), 0, 250);
+        }
+        return $names;
+    }
+
+    /**
+     * Modo precio a cero: precio específico del carrito, porcentaje de descuento
+     * sobre la línea para que las unidades de regalo salgan gratis y el resto se cobre.
+     * En porcentaje no depende del IVA ni de la dirección del cliente.
+     */
+    public function applyZeroPrice($cart, array &$state)
     {
         $products = $cart->getProducts(true);
         $lineQty = $this->lineQty($products, $state['id_product'], $state['id_product_attribute']);
@@ -806,7 +1076,8 @@ class JosraGiftManager
             );
         }
 
-        // El precio ya está guardado en la línea del pedido.
+        // El precio ya está guardado en la línea del pedido. El vale (modo vale)
+        // se queda: ya es parte del pedido.
         JosraGiftCart::deleteSpecificPrice($state['id_specific_price'], $idCart);
     }
 
